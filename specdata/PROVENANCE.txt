@@ -1,0 +1,3 @@
+wmo-im/GRIB2@ad61905de4570eaf4f3ab1a1df3a07122bf4d338 (committed 2026-07-06, amendments through FT2026-1)
+wmo-im/CCT@8d5866c2a7b4697d0ac9af332a7706ca931f7fff (Common Code Tables, C-11 centres)
+synced 2026-10-04 via GitHub API tarballs; refresh procedure: see specdata/README.md

@@ -1,0 +1,41 @@
+# research scratch (large HTML/JSON dumps; key evidence copied to docs/)
+.research/
+
+# AI-B working scratch
+.b-tmp/
+.smoke/
+
+# AI-A2 working scratch (P5-2 bench driver sources; canonical copy kept on the bench host under /root/a-p5)
+.a2-p5/
+
+# Go build artifacts
+*.exe
+dist/
+
+# wasm 构建产物与胶水（与 Go 版本强绑定，按 wasm/README.md 现场生成）
+wasm/grib.wasm
+wasm/wasm_exec.js
+wasm/viewer.standalone.html
+
+# eccodes index caches (transient, regenerated on every codes_* run over testdata)
+*.idx
+
+# transfer bundles (transient sync artifacts)
+.tools-sync/
+
+# AI 助手工作区 / IDE / 本地实验数据与缓存（不入库）
+.workbuddy-ai/
+.idea/
+.c38-exp/
+.m-realworld/
+.testcache/
+
+# 内部 AI 工作簿文档（不上传，仅本地）
+/COORDINATION.md
+/TODO.md
+/bug.md
+/simple-grib-设计方案.md
+/环境与推送手册.md
+/项目状态与约定.md
+/GRIB2-spec-核验报告.md
+/GRIB2-官方文档调研.md

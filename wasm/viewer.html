@@ -1,0 +1,833 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>simple-grib · GRIB2 查看器（WebAssembly）</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Ctext y='13' font-size='13'%3E%F0%9F%8C%A6%3C/text%3E%3C/svg%3E">
+<style>
+  :root {
+    --bg: #12141a; --panel: #1a1d25; --panel2: #151821; --line: #2a2f3a;
+    --fg: #e7eaf0; --dim: #8f99ab; --accent: #4ea1ff; --ok: #4ecb8f;
+    --warn: #ffb454; --bad: #ff6b6b;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    margin: 0; background: var(--bg); color: var(--fg);
+    font: 13px/1.65 ui-sans-serif, "Segoe UI", "Microsoft YaHei", system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  a { color: var(--accent); }
+
+  header {
+    position: sticky; top: 0; z-index: 5;
+    display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+    padding: 12px 20px; background: #12141aee; backdrop-filter: blur(6px);
+    border-bottom: 1px solid var(--line);
+  }
+  header h1 { font-size: 14px; font-weight: 600; margin: 0; letter-spacing: .01em; }
+  header h1 span { color: var(--dim); font-weight: 400; }
+  #status { color: var(--dim); font-size: 12px; }
+  header .spacer { flex: 1; }
+
+  button, select, input[type=number] {
+    background: #ffffff0f; color: var(--fg); border: 1px solid var(--line);
+    border-radius: 6px; padding: 5px 10px; font: inherit; cursor: pointer;
+  }
+  button:hover { background: #ffffff1c; border-color: #3b4250; }
+  button:disabled { opacity: .45; cursor: default; }
+  select, input[type=number] { cursor: auto; }
+  input[type=number] { width: 92px; cursor: text; }
+
+  main {
+    display: grid; grid-template-columns: 330px minmax(0, 1fr);
+    gap: 16px; padding: 16px 20px 60px; align-items: start;
+  }
+  @media (max-width: 980px) { main { grid-template-columns: 1fr; } }
+
+  .panel {
+    background: var(--panel); border: 1px solid var(--line);
+    border-radius: 10px; padding: 13px 14px; margin-bottom: 16px;
+  }
+  .panel h2 {
+    font-size: 11px; text-transform: uppercase; letter-spacing: .1em;
+    color: var(--dim); margin: 0 0 10px; font-weight: 600;
+  }
+  .panel h3 {
+    font-size: 12px; margin: 14px 0 6px; color: var(--accent); font-weight: 600;
+  }
+  .panel h3:first-child { margin-top: 0; }
+
+  #drop {
+    border: 1px dashed #3a4150; border-radius: 10px; padding: 24px 14px;
+    text-align: center; color: var(--dim); cursor: pointer; transition: .15s;
+  }
+  #drop:hover { border-color: #4a5364; }
+  #drop b { color: var(--fg); font-weight: 600; }
+  #drop small { display: block; margin-top: 6px; font-size: 12px; }
+
+  .msg {
+    padding: 8px 9px; border-radius: 7px; cursor: pointer;
+    border: 1px solid transparent; margin-bottom: 3px;
+  }
+  .msg:hover { background: #ffffff09; }
+  .msg.on { border-color: var(--accent); background: #4ea1ff16; }
+  .msg .t { font-weight: 600; }
+  .msg .s { color: var(--dim); font-size: 12px; }
+  .msg .w { color: var(--warn); }
+
+  canvas { width: 100%; height: auto; display: block; border-radius: 8px; background: #0b0d11; image-rendering: pixelated; }
+  .bar { height: 13px; border-radius: 3px; border: 1px solid var(--line); margin-top: 9px; }
+  .barlab { display: flex; justify-content: space-between; color: var(--dim); font-size: 12px; }
+
+  table { width: 100%; border-collapse: collapse; }
+  td { padding: 2px 0; vertical-align: top; }
+  td.k { color: var(--dim); width: 44%; padding-right: 12px; }
+  td.v { word-break: break-word; }
+
+  .grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 4px 26px; }
+
+  pre {
+    background: #0b0d11; border: 1px solid var(--line); border-radius: 8px;
+    padding: 10px; overflow: auto; max-height: 280px; font-size: 12px; margin: 0;
+  }
+  code, pre, .mono { font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; }
+
+  .scroll { max-height: 340px; overflow: auto; border: 1px solid var(--line); border-radius: 8px; }
+  .scroll table { font-size: 12px; }
+  .scroll th {
+    position: sticky; top: 0; background: #1f232c; color: var(--dim);
+    font-weight: 600; text-align: left; padding: 5px 9px; border-bottom: 1px solid var(--line);
+  }
+  .scroll td { padding: 3px 9px; border-bottom: 1px solid #222630; }
+  .scroll tr:last-child td { border-bottom: 0; }
+
+  .row { display: flex; gap: 14px; align-items: center; flex-wrap: wrap; }
+  .row label { color: var(--dim); display: inline-flex; gap: 6px; align-items: center; }
+  .err { color: var(--bad); }
+  .warn { color: var(--warn); }
+  .ok { color: var(--ok); }
+  .dim { color: var(--dim); }
+  .pill {
+    display: inline-block; padding: 1px 7px; border-radius: 20px;
+    background: #ffffff12; color: var(--dim); font-size: 11px; margin-left: 6px;
+  }
+  #overlay {
+    position: fixed; inset: 0; z-index: 20; display: none;
+    align-items: center; justify-content: center;
+    background: #0b0d11d9; border: 2px dashed var(--accent);
+    color: var(--accent); font-size: 20px; font-weight: 600;
+  }
+  #overlay.on { display: flex; }
+  .hint { color: var(--dim); font-size: 12px; margin-top: 8px; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>simple-grib <span>· GRIB2 查看器</span></h1>
+  <span id="status">正在加载 WebAssembly 模块…</span>
+  <span class="spacer"></span>
+  <button id="btnSample">载入示例</button>
+  <button id="btnOpen">打开文件…</button>
+  <button id="btnCopy" disabled>复制元数据 JSON</button>
+</header>
+
+<main>
+  <div>
+    <div class="panel">
+      <h2>文件</h2>
+      <div id="drop">
+        <b>把 .grib2 拖到这里</b>
+        <small>或点击选择 · 数据不出本机，全程在浏览器里解码</small>
+      </div>
+      <input id="file" type="file" accept=".grib2,.grib,.grb2,.grb,.bin,.dat" hidden>
+      <div id="fileInfo" class="hint">还没有文件</div>
+    </div>
+
+    <div class="panel">
+      <h2>消息</h2>
+      <div id="msgs" class="dim">—</div>
+    </div>
+
+    <div class="panel">
+      <h2>图例</h2>
+      <div class="dim" style="font-size:12px">
+        <div>← → 切换消息</div>
+        <div>鼠标悬停看图上的数值与坐标</div>
+        <div>规则网格画成栅格，投影网格自动画成散点</div>
+      </div>
+    </div>
+  </div>
+
+  <div>
+    <div class="panel">
+      <h2>场</h2>
+      <div class="row" style="margin-bottom:10px">
+        <label>色阶
+          <select id="cmap">
+            <option value="temp">温度（蓝→红）</option>
+            <option value="terrain">地形（绿→棕→白）</option>
+            <option value="rain">降水（浅→深蓝→紫）</option>
+            <option value="mono">灰阶</option>
+          </select>
+        </label>
+        <label><input id="auto" type="checkbox" checked> 自动量程</label>
+        <label>min <input id="vmin" type="number" step="any"></label>
+        <label>max <input id="vmax" type="number" step="any"></label>
+        <span class="spacer" style="flex:1"></span>
+        <button id="btnPng" disabled>导出 PNG</button>
+      </div>
+      <canvas id="cv" width="760" height="380"></canvas>
+      <div class="bar" id="bar"></div>
+      <div class="barlab"><span id="vlo">—</span><span id="vhi">—</span></div>
+      <div id="hover" class="hint">把鼠标移到图上查看数值</div>
+    </div>
+
+    <div class="panel">
+      <h2>元数据</h2>
+      <div id="meta" class="dim">—</div>
+    </div>
+
+    <div class="panel">
+      <h2>数值</h2>
+      <div id="vstats" class="dim" style="margin-bottom:10px">—</div>
+      <div class="row" style="margin-bottom:10px">
+        <button id="btnCsv" disabled>导出 CSV（全部值）</button>
+        <span class="dim">表里只列前 200 行</span>
+      </div>
+      <div class="scroll" id="vtable" style="display:none">
+        <table>
+          <thead><tr><th>#</th><th>lat</th><th>lon</th><th>值</th></tr></thead>
+          <tbody id="vbody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>错误 / 警告</h2>
+      <div id="errs" class="dim">—</div>
+    </div>
+  </div>
+</main>
+
+<div id="overlay">松手即可解析</div>
+
+<script src="wasm_exec.js"></script>
+<script>/* WBGRIB:PAYLOAD */</script>
+<script>
+"use strict";
+/* global Go */
+
+const $ = (id) => document.getElementById(id);
+const statusEl = $("status");
+
+// ============================================================ 1. 启动 wasm
+let api = null;
+
+function b64ToBytes(b64) {
+  const bin = atob(b64);
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
+
+// 单文件版把 gzip 后的 wasm 以 base64 内联在 __WBGRIB_WASM_GZ__ 里；
+// 常规版直接 fetch 同目录的 grib.wasm。两条路最终都拿到模块字节。
+async function wasmBytes() {
+  if (typeof window.__WBGRIB_WASM_GZ__ === "string") {
+    const gz = b64ToBytes(window.__WBGRIB_WASM_GZ__);
+    const ds = new DecompressionStream("gzip");
+    const stream = new Blob([gz]).stream().pipeThrough(ds);
+    return await new Response(stream).arrayBuffer();
+  }
+  const r = await fetch("grib.wasm");
+  if (!r.ok) throw new Error("拿不到 grib.wasm（HTTP " + r.status + "）");
+  return await r.arrayBuffer();
+}
+
+async function boot() {
+  if (typeof Go === "undefined") {
+    statusEl.innerHTML = '<span class="err">缺少 wasm_exec.js</span> —— 见 wasm/README.md 的构建步骤';
+    return;
+  }
+  try {
+    const go = new Go();
+    const bytes = await wasmBytes();
+    const { instance } = await WebAssembly.instantiate(bytes, go.importObject);
+    go.run(instance); // main 里 select{} 阻塞，这里不 await
+    api = globalThis.simpleGrib;
+    statusEl.innerHTML = '<span class="ok">就绪</span> · 绑定层 v' + api.version();
+    $("btnSample").disabled = false;
+    const q = new URLSearchParams(location.search);
+    if (q.get("sample") !== null) loadSample(parseInt(q.get("sample"), 10) || 0);
+  } catch (e) {
+    statusEl.innerHTML = '<span class="err">模块加载失败：' + esc(e.message) + "</span>";
+  }
+}
+
+// ============================================================ 2. 取文件
+let state = { name: "", res: null, sel: 0, raster: null, scatter: null };
+
+$("drop").addEventListener("click", () => $("file").click());
+$("btnOpen").addEventListener("click", () => $("file").click());
+$("file").addEventListener("change", (e) => e.target.files[0] && load(e.target.files[0]));
+
+let dragDepth = 0;
+addEventListener("dragenter", (e) => { e.preventDefault(); if (++dragDepth === 1) $("overlay").classList.add("on"); });
+addEventListener("dragover", (e) => e.preventDefault());
+addEventListener("dragleave", (e) => { e.preventDefault(); if (--dragDepth <= 0) { dragDepth = 0; $("overlay").classList.remove("on"); } });
+addEventListener("drop", (e) => {
+  e.preventDefault();
+  dragDepth = 0; $("overlay").classList.remove("on");
+  const f = e.dataTransfer && e.dataTransfer.files[0];
+  if (f) load(f);
+});
+
+const SAMPLES = [
+  ["GRIB1 真实 ECMWF 场（18 条 / 736,434 值）", "../.m-realworld/D6F122900000119____1"],
+  ["真实 500hPa 高度场（900×451，complex 5.2）", "../testdata/gribw-xcheck/complex_52_gh500_real.grib2"],
+  ["真实 850hPa 温度场（900×451，complex 5.2）", "../testdata/gribw-xcheck/complex_52_t850_real.grib2"],
+  ["Gaussian 网格（3.40，8192 点）", "../testdata/p6-a-xcheck/p6a_gauss.grib2"],
+  ["Lambert 投影网格（3.30，30 点）", "../testdata/p6-a-xcheck/p6a_lcc.grib2"],
+  ["极射赤面投影（3.20，20 点）", "../testdata/p6-a-xcheck/p6a_ps.grib2"],
+  ["HRRR CONUS Lambert 网格（1.9M 点，常量场）", "../testdata/gribw-xcheck/hrrr_conus_apcp_c38_t30.grib2"],
+  ["3×3 极小样本（188 字节）", "../testdata/ecc-xcheck/poscorners.grib2"],
+];
+
+$("btnSample").addEventListener("click", () => loadSample(0));
+
+async function loadSample(prefer) {
+  // 从 prefer 起轮转，第一个能取到的就用它
+  for (let k = 0; k < SAMPLES.length; k++) {
+    const [label, url] = SAMPLES[(prefer + k) % SAMPLES.length];
+    try {
+      const r = await fetch(url);
+      if (!r.ok) continue;
+      const blob = await r.blob();
+      await load(new File([blob], url.split("/").pop() + "  ·  " + label));
+      return;
+    } catch (_) { /* 试下一个 */ }
+  }
+  statusEl.innerHTML = '<span class="warn">找不到示例样本：请在仓库根目录起静态服务器（python3 -m http.server），或直接拖一个 .grib2 进来</span>';
+}
+
+// ============================================================ 3. 解析
+// window.__viewerReady 供自动化冒烟测试轮询（见 wasm/README.md）。
+async function load(file) {
+  if (!api) { statusEl.innerHTML = '<span class="warn">模块还没就绪</span>'; return; }
+  window.__viewerReady = false;
+  statusEl.textContent = "解码中…";
+  await new Promise((r) => setTimeout(r, 0)); // 先把"解码中"画出来
+
+  const buf = await file.arrayBuffer();
+  const t0 = performance.now();
+  let res;
+  try {
+    // perPoint：坐标展开成与 values 逐点同序，前端不必操心扫描方向
+    res = api.decode(new Uint8Array(buf), { values: true, points: true, perPoint: true });
+  } catch (e) {
+    statusEl.innerHTML = '<span class="err">解码抛异常：' + esc(e.message) + "</span>";
+    return;
+  }
+  const ms = performance.now() - t0;
+
+  state = { name: file.name, res, sel: 0, raster: null, scatter: null };
+  $("btnCopy").disabled = false;
+  $("btnPng").disabled = false;
+  $("btnCsv").disabled = false;
+  $("fileInfo").innerHTML =
+    esc(file.name) + "<br>" +
+    (buf.byteLength / 1024).toFixed(1) + " KB · " +
+    (res.numMessages || 0) + " 条消息 · 解码 " + ms.toFixed(1) + " ms";
+
+  if (!res.ok) {
+    statusEl.innerHTML = '<span class="err">' + esc(file.name) + " 解析失败</span>";
+    renderErrors(res);
+    $("msgs").innerHTML = '<span class="dim">没有可用消息</span>';
+    $("meta").textContent = "—";
+    $("vstats").textContent = "—";
+    $("vtable").style.display = "none";
+    clearCanvas("文件级解析失败");
+    window.__viewerReady = true;
+    return;
+  }
+  statusEl.innerHTML = '<span class="ok">已解析</span> · ' + esc(file.name) + " · " + res.numMessages + " 条消息";
+  renderMessages();
+  select(0);
+  window.__viewerReady = true;
+}
+
+// ============================================================ 4. 消息列表
+function renderMessages() {
+  const box = $("msgs");
+  box.innerHTML = "";
+  const msgs = state.res.messages || [];
+  if (!msgs.length) { box.innerHTML = '<span class="dim">没有消息</span>'; return; }
+  msgs.forEach((m, i) => {
+    const d = document.createElement("div");
+    d.className = "msg" + (i === state.sel ? " on" : "");
+    const p = m.product || {}, g = m.grid || {};
+    // GRIB1 没有产品模板（templateNumber=-1），名字直接给"GRIB1"；
+    // GRIB2 用模板号兜底。
+    const title = p.parameterName || (m.edition === 1 ? "GRIB1 消息" : (p.templateNumber !== undefined ? "模板 4." + p.templateNumber : "消息 " + i));
+    const bits = [];
+    if (g.ni && g.nj) bits.push(g.ni + "×" + g.nj);
+    if (m.stats) bits.push(m.stats.count.toLocaleString() + " 值");
+    if (p.level1) bits.push(plainLevel(p.level1));
+    const bad = (m.errors || []).length;
+    d.innerHTML =
+      '<div class="t">#' + i + " " + esc(title) +
+      (m.identification ? '<span class="pill">' + esc(shortCentre(m.identification)) + "</span>" : "") + "</div>" +
+      '<div class="s">' + esc(bits.join(" · ")) + (bad ? ' <span class="w">⚠ ' + bad + " 项警告</span>" : "") + "</div>";
+    d.onclick = () => select(i);
+    box.appendChild(d);
+  });
+}
+
+function shortCentre(id) {
+  const n = id.centreName || ("centre " + id.centre);
+  return n.length > 28 ? n.slice(0, 26) + "…" : n;
+}
+
+function select(i) {
+  state.sel = i;
+  document.querySelectorAll(".msg").forEach((el, k) => el.classList.toggle("on", k === i));
+  const m = state.res.messages[i];
+  if (!m) return;
+  renderMeta(m);
+  renderValues(m);
+  renderErrors(m);
+  buildField(m);
+}
+
+addEventListener("keydown", (e) => {
+  const n = (state.res && state.res.messages || []).length;
+  if (!n || e.target.tagName === "INPUT") return;
+  if (e.key === "ArrowDown" || e.key === "ArrowRight") { select(Math.min(n - 1, state.sel + 1)); e.preventDefault(); }
+  if (e.key === "ArrowUp" || e.key === "ArrowLeft") { select(Math.max(0, state.sel - 1)); e.preventDefault(); }
+});
+
+// ============================================================ 5. 元数据面板
+function renderMeta(m) {
+  const out = [];
+  const T = (rows) => {
+    out.push("<table>" + rows.filter(Boolean).map(([k, v]) => `<tr><td class="k">${esc(k)}</td><td class="v">${v}</td></tr>`).join("") + "</table>");
+  };
+  const id = m.identification;
+
+  out.push("<h3>消息</h3>");
+  T([
+    ["索引 / 偏移", m.index + " · " + m.offset + " 字节"],
+    ["消息长度", m.size + " 字节"],
+    m.edition === 1
+      ? ["学科", "<span class='dim'>不适用（GRIB1 无学科字段）</span>"]
+      : ["学科", esc(m.disciplineName || "") + " <span class='dim'>(" + m.discipline + ")</span>"],
+    ["sections", (m.sections || []).map((n, k) => n + "(" + ((m.sectionSizes || [])[k] || "?") + "B)").join("  ")],
+  ]);
+
+  if (id) {
+    out.push("<h3>Identification（section 1）</h3>");
+    T([
+      ["中心", esc(id.centreName || "—") + " <span class='dim'>(" + id.centre + "/" + id.subCentre + ")</span>"],
+      ["参考时间（UTC）", esc(id.referenceTime)],
+      // GRIB1 没有这两个概念（Go 侧给 -1）：显示"不适用"而不是裸 -1。
+      id.productionStatus >= 0 ? ["生产状态", esc(id.productionStatusName || "") + " <span class='dim'>(" + id.productionStatus + ")</span>"] : ["生产状态", "<span class='dim'>不适用（GRIB1）</span>"],
+      id.typeOfProcessedData >= 0 ? ["数据类型", esc(id.typeOfProcessedDataName || "") + " <span class='dim'>(" + id.typeOfProcessedData + ")</span>"] : ["数据类型", "<span class='dim'>不适用（GRIB1）</span>"],
+      ["主表 / 本地表版本", id.masterTableVersion + " / " + id.localTableVersion],
+      id.calendarTemplate >= 0 ? ["日历模板", id.calendarTemplate] : null,
+    ]);
+  }
+
+  if (m.product) {
+    const p = m.product;
+    out.push("<h3>Product（section 4）</h3>");
+    T([
+      // GRIB1 的参数只有"指示码"一个维度（表 2）；GRIB2 是 category.number 两维。
+      // 码空间不同：GRIB1 的 number 要按 (中心, 表版本) 查表 2，不在前端解释。
+      m.edition === 1
+        ? ["参数", "<b>" + esc(p.parameterName || "—") + "</b> <span class='dim'>(GRIB1 表 2 码 " + p.parameterNumber + (p.parameterName ? "" : "，未注册参数表") + ")</span>"]
+        : ["参数", "<b>" + esc(p.parameterName || "—") + "</b> <span class='dim'>(category " + p.parameterCategory + " · number " + p.parameterNumber + ")</span>"],
+      m.edition === 1
+        ? ["product 模板", "<span class='dim'>不适用（GRIB1 无产品模板）</span>"]
+        : ["product 模板", "4." + p.templateNumber + " <span class='dim'>" + esc(p.templateName || "") + "</span>"],
+      ["生成过程", p.typeOfGeneratingProcess],
+      p.forecastTime ? ["预报时效", p.forecastTime.raw + " × 单位 " + p.forecastTime.unit + " = " + (p.forecastTime.seconds / 3600).toFixed(3) + " h" + (p.forecastTime.overflow ? " <span class='warn'>(饱和)</span>" : "")] : null,
+      p.level1 ? ["层 1", levelText(p.level1)] : null,
+      p.level2 && p.level2.type !== 255 ? ["层 2", levelText(p.level2)] : null,
+      ["NV", p.nv],
+    ]);
+  }
+
+  if (m.grid) {
+    const g = m.grid;
+    out.push("<h3>Grid（section 3）</h3>");
+    T([
+      m.edition === 1
+        ? ["网格类型", g.templateNumber + " <span class='dim'>" + esc(g.templateName || "") + "</span>（GRIB1 表 6）"]
+        : ["网格模板", "3." + g.templateNumber + " <span class='dim'>" + esc(g.templateName || "") + "</span>"],
+      ["尺寸", g.ni + " × " + g.nj + " = " + g.numPoints.toLocaleString() + " 点" + (g.quasiRegular ? "（准规则）" : "")],
+      ["坐标模式", esc(g.coordinateMode || "无")],
+      ["地球", "形状 " + g.shapeOfEarth + " · R = " + g.radius + " m"],
+      g.pointsError ? ["坐标错误", "<span class='warn'>" + esc(g.pointsError) + "</span>"] : null,
+    ]);
+  }
+
+  if (m.dataRep) {
+    out.push("<h3>Data representation（section 5）</h3>");
+    T([
+      m.edition === 1
+        ? ["数据表示", "<span class='dim'>" + esc(m.dataRep.templateName || "GRIB1 simple packing") + "</span>"]
+        : ["data 模板", "5." + m.dataRep.templateNumber + " <span class='dim'>" + esc(m.dataRep.templateName || "") + "</span>"],
+      ["声明值数", m.dataRep.numValues.toLocaleString()],
+    ]);
+  }
+
+  $("meta").innerHTML = out.join("");
+}
+
+function levelText(lv) {
+  const name = lv.typeName ? esc(lv.typeName) + " <span class='dim'>(" + lv.type + ")</span>" : "type " + lv.type;
+  if (!lv.hasValue) return name + " <span class='dim'>· 无值</span>";
+  const hPa = lv.type === 100 ? " <span class='dim'>(" + (lv.scale / 100).toFixed(0) + " hPa)</span>" : "";
+  return name + " · " + lv.scale + hPa;
+}
+
+// 纯文本版层描述（列表里用，不带 HTML）
+function plainLevel(lv) {
+  if (lv.type === 100 && lv.hasValue) return (lv.scale / 100).toFixed(0) + " hPa";
+  if (lv.typeName) return lv.typeName;
+  return "层 " + lv.type;
+}
+
+// ============================================================ 6. 数值面板
+function renderValues(m) {
+  if (!m.values || !m.stats) {
+    $("vstats").innerHTML = '<span class="warn">这条消息没有解码出数值</span>';
+    $("vtable").style.display = "none";
+    return;
+  }
+  const s = m.stats;
+  $("vstats").innerHTML =
+    "共 <b>" + s.count.toLocaleString() + "</b> 个值 · " +
+    "min <b>" + fmt(s.min) + "</b> · max <b>" + fmt(s.max) + "</b> · mean <b>" + fmt(s.mean) + "</b>" +
+    (s.nanCount ? ' · <span class="warn">缺测 ' + s.nanCount.toLocaleString() + "</span>" : "");
+
+  const hasXY = hasPoints(m);
+  const n = Math.min(200, m.values.length);
+  const rows = [];
+  for (let i = 0; i < n; i++) {
+    rows.push("<tr><td>" + i + "</td><td>" +
+      (hasXY ? m.grid.lats[i].toFixed(4) : "—") + "</td><td>" +
+      (hasXY ? m.grid.lons[i].toFixed(4) : "—") + "</td><td>" +
+      fmt(m.values[i]) + "</td></tr>");
+  }
+  $("vbody").innerHTML = rows.join("");
+  $("vtable").style.display = "";
+}
+
+// 坐标是否与 values 逐点对齐（grid.lats 是 Float64Array，不是 Array，别用 Array.isArray）
+function hasPoints(m) {
+  return !!(m.grid && m.grid.lats && m.grid.lons &&
+    m.grid.lats.length === m.values.length && m.grid.lons.length === m.values.length);
+}
+
+function fmt(x) {
+  if (Number.isNaN(x)) return '<span class="warn">NaN</span>';
+  if (!isFinite(x)) return String(x);
+  return Number(x.toPrecision(7)).toString();
+}
+
+// ============================================================ 7. 错误面板
+function renderErrors(m) {
+  const list = (m && m.errors) || [];
+  const top = (state.res && state.res.errors) || [];
+  if (!list.length && !top.length) { $("errs").innerHTML = '<span class="ok">没有错误</span>'; return; }
+  const html = [];
+  if (top.length) html.push("<div class='err'><b>文件级</b><br>" + top.map(esc).join("<br>") + "</div>");
+  if (list.length) html.push("<div class='err'><b>消息 #" + m.index + "</b><br>" + list.map(esc).join("<br>") + "</div>");
+  $("errs").innerHTML = html.join("");
+}
+
+// ============================================================ 8. 渲染
+const RAMPS = {
+  temp: ["#2b1a4d", "#2a5fbf", "#37b3c8", "#8fd96b", "#ffd24a", "#ff7a3d", "#c81e3a"],
+  terrain: ["#123d24", "#3f7a33", "#a8bf62", "#c9a06a", "#8a6a4a", "#c8c8c8", "#ffffff"],
+  rain: ["#eaf4ff", "#9fd0f5", "#3f8fd6", "#1f4fa8", "#5a2ea6", "#8e2a9e"],
+  mono: ["#101318", "#f2f5fa"],
+};
+
+function rampOf(name) {
+  const stops = RAMPS[name] || RAMPS.mono;
+  return stops.map((h) => [parseInt(h.slice(1, 3), 16), parseInt(h.slice(3, 5), 16), parseInt(h.slice(5, 7), 16)]);
+}
+
+function colorAt(t, stops) {
+  t = t < 0 ? 0 : t > 1 ? 1 : t;
+  const x = t * (stops.length - 1);
+  const i = Math.min(stops.length - 2, Math.floor(x));
+  const f = x - i, a = stops[i], b = stops[i + 1];
+  return [
+    Math.round(a[0] + (b[0] - a[0]) * f),
+    Math.round(a[1] + (b[1] - a[1]) * f),
+    Math.round(a[2] + (b[2] - a[2]) * f),
+  ];
+}
+
+function clearCanvas(msg) {
+  const cv = $("cv"), ctx = cv.getContext("2d");
+  cv.width = 760; cv.height = 200;
+  ctx.clearRect(0, 0, cv.width, cv.height);
+  ctx.fillStyle = "#8f99ab"; ctx.font = "13px sans-serif";
+  ctx.fillText(msg, 16, 30);
+  $("bar").style.background = "none";
+  $("vlo").textContent = "—"; $("vhi").textContent = "—";
+  $("hover").textContent = "把鼠标移到图上查看数值";
+  cv.onmousemove = null;
+}
+
+// 规则网格 -> 栅格；投影网格 -> 散点。两者都直接吃逐点数组，
+// 因此各种扫描方向（WE:SN / NS / 交替行）都已经由库处理过。
+function buildField(m) {
+  state.raster = null; state.scatter = null;
+  const g = m.grid;
+  if (!g || !m.values || !g.lats || !g.lons) { clearCanvas("这条消息没有数值或坐标"); return; }
+
+  const ni = g.ni, nj = g.nj, np = m.values.length;
+  if (ni > 0 && nj > 0 && ni * nj === np && g.lats.length === np) {
+    state.raster = buildRaster(m, ni, nj);
+  }
+  if (!state.raster) state.scatter = buildScatter(m);
+
+  const src = state.raster || state.scatter;
+  if (!src) { clearCanvas("无法把这组坐标画成图（" + (g.coordinateMode || "无坐标") + "）"); return; }
+
+  $("vmin").value = src.min.toPrecision(6);
+  $("vmax").value = src.max.toPrecision(6);
+  $("auto").checked = true;
+  draw();
+}
+
+// 栅格只对"行内纬度恒定"的网格成立（规则经纬网格 / Gaussian）。
+// 投影网格（3.20/3.30）虽然也有 Ni×Nj 的排布，但行内纬度是变的 —— 那种交给散点，
+// 否则会把投影平面当成经纬平面画歪，还容易被跨 0° 经线的行误判成反向。
+const ROW_LAT_TOL = 1e-6;
+
+function rowConstantLat(g, ni, nj) {
+  for (let j = 0; j < nj; j++) {
+    const base = j * ni, ref = g.lats[base];
+    for (let i = 1; i < ni; i++) {
+      if (Math.abs(g.lats[base + i] - ref) > ROW_LAT_TOL) return false;
+    }
+  }
+  return true;
+}
+
+function buildRaster(m, ni, nj) {
+  const g = m.grid;
+  if (!rowConstantLat(g, ni, nj)) return null;
+
+  const data = new Float32Array(ni * nj);
+  const lats = new Float64Array(nj);
+  let anyNaN = false;
+  for (let j = 0; j < nj; j++) {
+    const base = j * ni;
+    lats[j] = g.lats[base];
+    // 蛇形扫描的行内方向是反的：按"该行经度是否递增"判断并翻回来，
+    // 保证画出来每一列对应的经度方向一致。
+    const inc = ni < 2 || g.lons[base + 1] > g.lons[base];
+    for (let i = 0; i < ni; i++) {
+      const src = inc ? base + i : base + (ni - 1 - i);
+      const v = m.values[src];
+      if (Number.isNaN(v)) anyNaN = true;
+      data[j * ni + i] = v;
+    }
+  }
+  const st = range(data);
+  if (!st) return null;
+  const flipY = nj > 1 && lats[0] < lats[nj - 1];
+  return {
+    kind: "raster", data, ni, nj, lats, flipY,
+    lonLeft: Math.min(g.lons[0], g.lons[ni - 1]),
+    lonRight: Math.max(g.lons[0], g.lons[ni - 1]),
+    min: st.min, max: st.max, anyNaN,
+  };
+}
+
+function buildScatter(m) {
+  const st = range(m.values);
+  if (!st) return null;
+  const lats = m.grid.lats, lons = m.grid.lons;
+  let laMin = Infinity, laMax = -Infinity, loMin = Infinity, loMax = -Infinity;
+  for (let i = 0; i < lats.length; i++) {
+    if (Number.isNaN(lats[i]) || Number.isNaN(lons[i])) continue;
+    if (lats[i] < laMin) laMin = lats[i];
+    if (lats[i] > laMax) laMax = lats[i];
+    if (lons[i] < loMin) loMin = lons[i];
+    if (lons[i] > loMax) loMax = lons[i];
+  }
+  if (!isFinite(laMin) || !isFinite(loMin)) return null;
+  return { kind: "scatter", lats, lons, values: m.values, laMin, laMax, loMin, loMax, min: st.min, max: st.max };
+}
+
+function range(arr) {
+  let min = Infinity, max = -Infinity;
+  for (let i = 0; i < arr.length; i++) {
+    const v = arr[i];
+    if (Number.isNaN(v)) continue;
+    if (v < min) min = v;
+    if (v > max) max = v;
+  }
+  if (!isFinite(min)) return null;
+  return { min, max };
+}
+
+function draw() {
+  const src = state.raster || state.scatter;
+  if (!src) return;
+  const stops = rampOf($("cmap").value);
+  let vmin = parseFloat($("vmin").value), vmax = parseFloat($("vmax").value);
+  if ($("auto").checked) { vmin = src.min; vmax = src.max; $("vmin").value = vmin.toPrecision(6); $("vmax").value = vmax.toPrecision(6); }
+  if (!(vmax > vmin)) vmax = vmin + 1;
+
+  const cv = $("cv"), ctx = cv.getContext("2d");
+  const W = 760;
+  const aspect = src.kind === "raster"
+    ? src.nj / src.ni
+    : (src.laMax - src.laMin) / Math.max(1e-9, src.loMax - src.loMin);
+  const H = Math.max(80, Math.min(1400, Math.round(W * aspect)));
+  cv.width = W; cv.height = H;
+  ctx.clearRect(0, 0, W, H);
+
+  const span = vmax - vmin;
+  if (src.kind === "raster") {
+    const img = ctx.createImageData(src.ni, src.nj);
+    for (let j = 0; j < src.nj; j++) {
+      const r = src.flipY ? src.nj - 1 - j : j;
+      for (let i = 0; i < src.ni; i++) {
+        const v = src.data[r * src.ni + i];
+        const o = (j * src.ni + i) * 4;
+        if (Number.isNaN(v)) { img.data[o + 3] = 0; continue; }
+        const c = colorAt((v - vmin) / span, stops);
+        img.data[o] = c[0]; img.data[o + 1] = c[1]; img.data[o + 2] = c[2]; img.data[o + 3] = 255;
+      }
+    }
+    const off = document.createElement("canvas");
+    off.width = src.ni; off.height = src.nj;
+    off.getContext("2d").putImageData(img, 0, 0);
+    ctx.imageSmoothingEnabled = false;
+    ctx.drawImage(off, 0, 0, src.ni, src.nj, 0, 0, W, H);
+  } else {
+    ctx.fillStyle = "#0b0d11";
+    ctx.fillRect(0, 0, W, H);
+    const dLon = Math.max(1e-9, src.loMax - src.loMin);
+    const dLat = Math.max(1e-9, src.laMax - src.laMin);
+    // 点数少的时候把点画大，否则 30 个点在图上看不见
+    const dot = src.values.length > 200000 ? 2 : src.values.length > 20000 ? 3 : 5;
+    for (let i = 0; i < src.values.length; i++) {
+      const v = src.values[i];
+      if (Number.isNaN(v)) continue;
+      const x = Math.round((src.lons[i] - src.loMin) / dLon * (W - 1));
+      const y = Math.round((src.laMax - src.lats[i]) / dLat * (H - 1));
+      const c = colorAt((v - vmin) / span, stops);
+      ctx.fillStyle = "rgb(" + c[0] + "," + c[1] + "," + c[2] + ")";
+      ctx.fillRect(x, y, dot, dot);
+    }
+  }
+
+  // 色标
+  $("bar").style.background = "linear-gradient(90deg," +
+    stops.map((s, i) => "rgb(" + s.join(",") + ") " + (i / (stops.length - 1) * 100).toFixed(0) + "%").join(",") + ")";
+  $("vlo").textContent = vmin.toPrecision(6);
+  $("vhi").textContent = vmax.toPrecision(6);
+
+  cv.onmousemove = (e) => {
+    const rc = cv.getBoundingClientRect();
+    const fx = (e.clientX - rc.left) / rc.width, fy = (e.clientY - rc.top) / rc.height;
+    let idx = -1, lat = NaN, lon = NaN, v = NaN;
+    if (src.kind === "raster") {
+      const i = Math.floor(fx * src.ni);
+      let j = Math.floor(fy * src.nj);
+      if (i < 0 || i >= src.ni || j < 0 || j >= src.nj) return;
+      const r = src.flipY ? src.nj - 1 - j : j;
+      idx = r * src.ni + i;
+      v = src.data[idx];
+      lat = src.lats[r];
+      lon = src.lonLeft + i * (src.lonRight - src.lonLeft) / Math.max(1, src.ni - 1);
+    } else {
+      const lon2 = src.loMin + fx * (src.loMax - src.loMin);
+      const lat2 = src.laMax - fy * (src.laMax - src.laMin);
+      let best = -1, bd = Infinity;
+      const step = Math.max(1, Math.floor(src.values.length / 40000)); // 大网格抽样找最近点
+      for (let i = 0; i < src.values.length; i += step) {
+        const dx = src.lons[i] - lon2, dy = src.lats[i] - lat2;
+        const d = dx * dx + dy * dy;
+        if (d < bd) { bd = d; best = i; }
+      }
+      if (best < 0) return;
+      idx = best; v = src.values[best]; lat = src.lats[best]; lon = src.lons[best];
+    }
+    $("hover").innerHTML = "值 <b>" + fmt(v) + "</b> · lat " + lat.toFixed(5) + " · lon " + lon.toFixed(5) +
+      ' · 索引 <span class="mono">' + idx + "</span>" +
+      (src.kind === "scatter" ? ' <span class="dim">（散点：最近点）</span>' : "");
+  };
+}
+
+$("cmap").addEventListener("change", draw);
+$("auto").addEventListener("change", draw);
+$("vmin").addEventListener("change", () => { $("auto").checked = false; draw(); });
+$("vmax").addEventListener("change", () => { $("auto").checked = false; draw(); });
+
+// ============================================================ 9. 导出
+$("btnPng").addEventListener("click", () => {
+  const a = document.createElement("a");
+  a.href = $("cv").toDataURL("image/png");
+  a.download = (state.name || "grib") + ".png";
+  a.click();
+});
+
+$("btnCsv").addEventListener("click", () => {
+  const m = state.res && state.res.messages[state.sel];
+  if (!m || !m.values) return;
+  const hasXY = hasPoints(m);
+  const parts = [hasXY ? "index,lat,lon,value" : "index,value"];
+  for (let i = 0; i < m.values.length; i++) {
+    parts.push(hasXY
+      ? i + "," + m.grid.lats[i] + "," + m.grid.lons[i] + "," + m.values[i]
+      : i + "," + m.values[i]);
+  }
+  download(new Blob([parts.join("\n")], { type: "text/csv" }), (state.name || "grib") + ".msg" + state.sel + ".csv");
+});
+
+$("btnCopy").addEventListener("click", async () => {
+  const m = state.res && state.res.messages[state.sel];
+  if (!m) return;
+  const clone = JSON.parse(JSON.stringify(m)); // values/lats 在 JSON 里本来就被排除了
+  try {
+    await navigator.clipboard.writeText(JSON.stringify(clone, null, 2));
+    statusEl.innerHTML = '<span class="ok">元数据 JSON 已复制到剪贴板</span>';
+  } catch (e) {
+    statusEl.innerHTML = '<span class="warn">复制失败（浏览器不给剪贴板权限）</span>';
+  }
+});
+
+function download(blob, name) {
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = name;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+}
+
+// ============================================================ 10. 杂项
+function esc(s) {
+  return String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+
+$("btnSample").disabled = true;
+$("btnOpen").disabled = true;
+boot().then(() => { $("btnOpen").disabled = false; });
+</script>
+</body>
+</html>
