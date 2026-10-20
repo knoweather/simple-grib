@@ -1,5 +1,5 @@
 {
- "generator": "gen_p6b.py (AI-B, P6-2)",
+ "generator": "gen_p6b.py",
  "eccodes": {
   "eccodes": "2.41.0",
   "bindings": "2.39.2"

@@ -226,4 +226,4 @@ L1 线格式层 File（io.ReaderAt + 消息索引）→ Message（整条缓冲�
 - **Powered by [GLM-5.3 Flash](https://z.ai)** — 特别感谢
  [OpenCode](https://opencode.ai) 提供的免费额度，促成了本次开发
 - **[Qwen 3.8 Flash](https://github.com/QwenLM)** — 开源模型，本地部署运行
-- **[腾讯 WorkBuddy](https://cloud.tencent.com/product/workbuddy)**
+- **[WorkBuddy](https://www.workbuddy.cn)**

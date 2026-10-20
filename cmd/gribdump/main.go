@@ -13,11 +13,13 @@ import (
 	"math"
 	"os"
 	"strconv"
+	"time"
 
 	"github.com/knoweather/simple-grib"
 	"github.com/knoweather/simple-grib/grib1"
 	"github.com/knoweather/simple-grib/grid"
 	"github.com/knoweather/simple-grib/pack"
+	"github.com/knoweather/simple-grib/paramdb"
 	"github.com/knoweather/simple-grib/spec"
 )
 
@@ -163,17 +165,24 @@ func dumpFile(path string, nValues int, jsonOut bool, sections []int) error {
 // ---------------------------------------------------------------------------
 
 type msgOutput struct {
-	Index      int          `json:"index"`
-	Offset     int64        `json:"offset"`
-	Size       int          `json:"size"`
-	Edition    int          `json:"edition"`
-	Discipline code         `json:"discipline"`
-	ID         idOut        `json:"identification"`
-	Sections   []int        `json:"sections"`
-	Grid       *gridOut     `json:"grid,omitempty"`
-	Product    *prodOut     `json:"product,omitempty"`
-	DataRep    *drOut       `json:"dataRep,omitempty"`
-	Values     []float32Val `json:"values,omitempty"`
+	Index      int      `json:"index"`
+	Offset     int64    `json:"offset"`
+	Size       int      `json:"size"`
+	Edition    int      `json:"edition"`
+	Discipline code     `json:"discipline"`
+	ID         idOut    `json:"identification"`
+	Sections   []int    `json:"sections"`
+	Grid       *gridOut `json:"grid,omitempty"`
+	Product    *prodOut `json:"product,omitempty"`
+	// Step 是 ecCodes 的 forecastTime/step/validityDate 三元组：begin 为区间
+	// 起点（参考时间 + 表 4.4 预报时效），end 为区间终点（统计模板的
+	// end-of-overall-interval，或 GRIB1 的 P2）。瞬时产品两者相等。
+	Step *stepOut `json:"step,omitempty"`
+	// ParamDB 是 paramdb 概念查询的结果（ecCodes shortName/name/paramId/
+	// units/typeOfLevel 的等价物）；查不到的键省略。
+	ParamDB *pdbOut      `json:"paramdb,omitempty"`
+	DataRep *drOut       `json:"dataRep,omitempty"`
+	Values  []float32Val `json:"values,omitempty"`
 	// Values64 只在 GRIB1 下填充：GRIB1 的取值公式在 float64 下算，直接降到
 	// float32 会丢有效位。GRIB2 的数值本身就是 binary32，用上面的 values 字段。
 	Values64       []float64Val `json:"values64,omitempty"`
@@ -185,6 +194,24 @@ type msgOutput struct {
 type code struct {
 	Code int    `json:"code"`
 	Name string `json:"name,omitempty"`
+}
+
+// pdbOut 是 paramdb 概念查询的输出视图。
+type pdbOut struct {
+	ShortName   string `json:"shortName,omitempty"`
+	Name        string `json:"name,omitempty"`
+	ParamID     int    `json:"paramId,omitempty"`
+	Units       string `json:"units,omitempty"`
+	TypeOfLevel string `json:"typeOfLevel,omitempty"`
+}
+
+// stepOut 是 Message.StepRange 的输出视图。
+type stepOut struct {
+	Begin string `json:"begin"`
+	End   string `json:"end"`
+	// StepHours = end − reference time（小时），即 ecCodes 的 "step"。
+	// 时间单位无固定时长（月/年）时 StepRange 返回 not-ok，本字段缺席。
+	StepHours float64Val `json:"stepHours"`
 }
 
 type idOut struct {
@@ -209,15 +236,20 @@ type gridOut struct {
 }
 
 type prodOut struct {
-	Template     code    `json:"template"`
-	Parameter    code    `json:"parameter"`
-	Category     int     `json:"category"`
-	Number       int     `json:"number"`
-	GenProcess   code    `json:"typeOfGeneratingProcess"`
-	ForecastTime *fcOut  `json:"forecastTime,omitempty"`
-	Level1       *lvlOut `json:"level1,omitempty"`
-	Level2       *lvlOut `json:"level2,omitempty"`
-	NV           int     `json:"nv"`
+	Template     code   `json:"template"`
+	Parameter    code   `json:"parameter"`
+	Unit         string `json:"unit,omitempty"` // WMO table 4.2 unit; "" = not declared
+	Category     int    `json:"category"`
+	Number       int    `json:"number"`
+	GenProcess   code   `json:"typeOfGeneratingProcess"`
+	ForecastTime *fcOut `json:"forecastTime,omitempty"`
+	// EndOfInterval is the statistical templates' "time of end of overall
+	// time interval" (GRIB2 4.8-4.14) — the interval *end*, while
+	// ForecastTime is its start.
+	EndOfInterval string  `json:"endOfOverallTimeInterval,omitempty"`
+	Level1        *lvlOut `json:"level1,omitempty"`
+	Level2        *lvlOut `json:"level2,omitempty"`
+	NV            int     `json:"nv"`
 }
 
 type fcOut struct {
@@ -389,9 +421,11 @@ func messageOutput(m *grib.Message, path string, i, nValues int, sections []int)
 		} else {
 			param.Code = -1
 		}
+		unit, _ := spec.ParameterUnit(m.Discipline(), p.ParameterCategory, p.ParameterNumber)
 		po := prodOut{
 			Template:   tmpl,
 			Parameter:  param,
+			Unit:       unit,
 			Category:   p.ParameterCategory,
 			Number:     p.ParameterNumber,
 			GenProcess: tableCode(4, 3, p.TypeOfGeneratingProcess),
@@ -400,6 +434,9 @@ func messageOutput(m *grib.Message, path string, i, nValues int, sections []int)
 		if p.ForecastTime != nil {
 			po.ForecastTime = &fcOut{Unit: tableCode(4, 4, p.ForecastTime.Unit), Value: p.ForecastTime.Value.String()}
 		}
+		if p.EndOfOverallInterval != nil {
+			po.EndOfInterval = p.EndOfOverallInterval.Format(time.RFC3339)
+		}
 		if p.Level1 != nil {
 			po.Level1 = &lvlOut{Type: tableCode(4, 5, p.Level1.Type), Scale: float64Val(p.Level1.Scale)}
 		}
@@ -407,6 +444,28 @@ func messageOutput(m *grib.Message, path string, i, nValues int, sections []int)
 			po.Level2 = &lvlOut{Type: tableCode(4, 5, p.Level2.Type), Scale: float64Val(p.Level2.Scale)}
 		}
 		mo.Product = &po
+	}
+
+	// paramdb 概念查询（ecCodes shortName/name/paramId/units/typeOfLevel）
+	if q, qerr := paramdb.QueryFrom(m); qerr == nil {
+		pdb := &pdbOut{}
+		pdb.ShortName, _ = paramdb.ShortName(q)
+		pdb.Name, _ = paramdb.Name(q)
+		pdb.ParamID, _ = paramdb.ParamID(q)
+		pdb.Units, _ = paramdb.Units(q)
+		pdb.TypeOfLevel, _ = paramdb.TypeOfLevel(q)
+		if pdb.ShortName != "" || pdb.Name != "" || pdb.ParamID != 0 || pdb.Units != "" || pdb.TypeOfLevel != "" {
+			mo.ParamDB = pdb
+		}
+	}
+
+	// 预报区间（ecCodes 的 forecastTime/step/validityDate 语义）
+	if b, e, ok := m.StepRange(); ok {
+		step := &stepOut{Begin: b.Format(time.RFC3339), End: e.Format(time.RFC3339)}
+		if id, err := m.Identification(); err == nil {
+			step.StepHours = float64Val(e.Sub(id.ReferenceTime).Hours())
+		}
+		mo.Step = step
 	}
 
 	// 数据表示（section 5）

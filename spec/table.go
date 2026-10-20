@@ -11,6 +11,15 @@ type Entry struct {
 	Max    int
 	Name   string
 	Status string // 条目状态："Operational" / "Experimental" / entry status
+	// Unit 是该表在 UnitComments_en 列给出的单位（如 K、Pa、m）。没有单位列、
+	// 空白、"-"（WMO 的无量纲写法）或指向别表的注释都归一成 ""。取到空串
+	// 只表示"该表没有声明单位"，不表示"无量纲"。
+	//
+	// Unit is the unit this table declares in its UnitComments_en column (K,
+	// Pa, m, …). Missing column, blank, "-" (WMO's dimensionless spelling)
+	// and cross-table notes all normalize to "". An empty Unit means "this
+	// table declares no unit", not "dimensionless".
+	Unit string
 }
 
 // Table 是一组带名字的条目集合，例如 "4.1"（参数类别）或 "CCT-11"（中心）。
@@ -33,7 +42,7 @@ func init() {
 	for _, gt := range genTables {
 		t := &Table{ID: gt.id, Title: gt.title}
 		for _, e := range gt.entries {
-			t.Entries = append(t.Entries, Entry{Min: int(e.min), Max: int(e.max), Name: e.name, Status: e.status})
+			t.Entries = append(t.Entries, Entry{Min: int(e.min), Max: int(e.max), Name: e.name, Status: e.status, Unit: e.unit})
 		}
 		tablesByID[t.ID] = t
 	}
@@ -87,4 +96,51 @@ func ParameterName(discipline, category, number int) (string, error) {
 		}
 	}
 	return "", fmt.Errorf("spec: no parameter %d.%d found in table 4.2", discipline, number)
+}
+
+// ParameterUnit resolves a WMO parameter triple (discipline, category,
+// number) to the unit declared for it: it first consults the hierarchical
+// table 4.2.<discipline>.<category> and falls back to the flat "4.2" table
+// on a miss, mirroring ParameterName's lookup order. An empty unit with a
+// nil error means the table exists and matches, but declares no unit for
+// that parameter (WMO table 4.2's local and reserved codes land here, as do
+// the dimensionless ones spelled "-"); use a units error only to tell "no
+// parameter table at all" apart from "parameter known, unit not declared".
+//
+// 单位取自 WMO 表的 UnitComments_en 列原文，保持 WMO 拼写（"W m-2"、
+// "m s-1"、"kg/kg"），不做 ecCodes 式归一 —— 需要归一化的调用方自己映射。
+//
+// Units are returned verbatim from the WMO tables' UnitComments_en column
+// ("W m-2", "m s-1", "kg/kg"), not normalized the way ecCodes spells them
+// ("W m**-2" variants differ across the WMO files themselves); callers that
+// need normalization must do it themselves.
+func ParameterUnit(discipline, category, number int) (string, error) {
+	id := fmt.Sprintf("4.2.%d.%d", discipline, category)
+	if t, ok := tablesByID[id]; ok {
+		if e, ok := t.Lookup(number); ok {
+			return e.Unit, nil
+		}
+	}
+	if t, ok := tablesByID["4.2"]; ok {
+		if e, ok := t.Lookup(number); ok {
+			return e.Unit, nil
+		}
+	}
+	return "", fmt.Errorf("spec: no parameter %d.%d found in table 4.2", discipline, number)
+}
+
+// LevelUnit returns the unit declared for a table 4.5 fixed-surface type
+// ("Pa" for isobaric surfaces, "m" for height above ground, "layer" for
+// layer types). WMO misses render the unit as "-", so local/unallocated
+// types return an empty unit with ok=false.
+func LevelUnit(surfaceType int) (string, bool) {
+	t, ok := tablesByID["4.5"]
+	if !ok {
+		return "", false
+	}
+	e, ok := t.Lookup(surfaceType)
+	if !ok || e.Unit == "" {
+		return "", false
+	}
+	return e.Unit, true
 }

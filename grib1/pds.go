@@ -20,6 +20,18 @@ type Identification struct {
 	Century           int  // octet 25
 	LocalDefinition   int  // octet 41 when a local definition exists; -1 = none
 	Climatological    bool // octet 13 = 255: climatological, no real reference time
+
+	// MARS 标签（可选）。只有 centre/subCentre 为 ECMWF 且本地定义声明了
+	// grib1/mars_labeling.def 时才有值；其余情况 HasMars 为 false，下面四个
+	// 字段保持零值。判定与布局见 mars.go。
+	//
+	// MARS labelling (optional). Populated only when the centre is ECMWF and the
+	// local definition declares grib1/mars_labeling.def; see mars.go.
+	HasMars                 bool
+	MarsClass               int    // octet 42, mars/class.table
+	MarsType                int    // octet 43, mars/type.table
+	MarsStream              int    // octets 44-45, mars/stream.table
+	ExperimentVersionNumber string // octets 46-49, 4 characters
 }
 
 // Product is the "what field, which level, which time range" part of section 1 (PDS).
@@ -228,6 +240,9 @@ func parsePDS(sec Section) (*Identification, *Product, error) {
 			return nil, nil, err
 		}
 		id.LocalDefinition = int(localDef)
+		if err := parseMarsLabelling(r, id); err != nil {
+			return nil, nil, err
+		}
 	}
 
 	prod.ParameterName = parameterName(id.Centre, id.TableVersion, prod.Parameter)
@@ -242,32 +257,100 @@ func parsePDS(sec Section) (*Identification, *Product, error) {
 // the caller must interpret P1/P2 against TimeRangeUnit itself. This matches the
 // GRIB2 side's Product.ForecastTime (which likewise refuses to convert units >= 3).
 func (p *Product) ForecastTime() (d time.Duration, ok bool) {
-	var unit time.Duration
-	switch p.TimeRangeUnit {
-	case 0, 254: // minutes (table 4 code 0) / seconds (code 254, the ecCodes extension)
-		if p.TimeRangeUnit == 0 {
-			unit = time.Minute
-		} else {
-			unit = time.Second
-		}
-	case 1:
-		unit = time.Hour
-	case 2:
-		unit = 24 * time.Hour
+	unit, ok := timeRangeUnitDuration(p.TimeRangeUnit)
+	if !ok {
+		return 0, false
+	}
+	return time.Duration(p.forecastCount()) * unit, true
+}
+
+// forecastCount is P1 as the table 5 wording defines the forecast period.
+// Indicator 10 is special: "P1 occupies octets 19 and 20", so its period is
+// the 16-bit big-endian pair (octet 19 << 8 | octet 20) rather than a single
+// octet — ecCodes computes stepRange the same way (P1=6, P2=12, unit=3h →
+// 4644h). Every other indicator uses octet 19 alone.
+func (p *Product) forecastCount() int {
+	if p.TimeRangeIndicator == 10 {
+		return p.P1<<8 | p.P2
+	}
+	return p.P1
+}
+
+// timeRangeUnitDuration maps a table 4 time-range unit code onto its fixed
+// duration. Months, years, decades and unrecognised codes have no fixed
+// duration and yield ok=false.
+func timeRangeUnitDuration(unit int) (time.Duration, bool) {
+	switch unit {
+	case 0: // minute
+		return time.Minute, true
+	case 1: // hour
+		return time.Hour, true
+	case 2: // day
+		return 24 * time.Hour, true
 	case 10:
-		unit = 3 * time.Hour
+		return 3 * time.Hour, true
 	case 11:
-		unit = 6 * time.Hour
+		return 6 * time.Hour, true
 	case 12:
-		unit = 12 * time.Hour
+		return 12 * time.Hour, true
 	case 13:
-		unit = 15 * time.Minute
+		return 15 * time.Minute, true
 	case 14:
-		unit = 30 * time.Minute
+		return 30 * time.Minute, true
+	case 254: // second (the ecCodes extension)
+		return time.Second, true
 	default:
 		return 0, false
 	}
-	return time.Duration(p.P1) * unit, true
+}
+
+// StepRange returns the product's time range as (begin, end) offsets relative
+// to the section-1 reference time, following the WMO table 5 wording encoded
+// in table5TimeRanges (transcribed from ecCodes' definitions/grib1/5.table).
+//
+// The table 5 indicator decides which of P1/P2 are interval bounds and with
+// which sign:
+//
+//	0, 1, 10, 51 — instantaneous / initialised: begin = end = P1 (P1=0 for 1;
+//	               indicator 10's P1 is the two-octet pair 19-20)
+//	2, 3, 4, 5   — range given as reference+P1 .. reference+P2
+//	6            — average over reference-P1 .. reference-P2 (both negative)
+//	7            — average over reference-P1 .. reference+P2
+//	113-125      — statistics over N forecasts: only the per-product forecast
+//	               period P1 is well-defined, so begin = end = P1
+//
+// Anything else (including an unknown indicator) is reported as begin = end =
+// P1: the forecast time itself is always valid, the interval is the part this
+// library refuses to invent. oks false only for units without a fixed
+// duration (months, years, …).
+func (p *Product) StepRange() (begin, end time.Duration, ok bool) {
+	unit, ok := timeRangeUnitDuration(p.TimeRangeUnit)
+	if !ok {
+		return 0, 0, false
+	}
+	p1 := time.Duration(p.forecastCount()) * unit
+	p2 := time.Duration(p.P2) * unit
+	switch p.TimeRangeIndicator {
+	case 6: // reference-P1 .. reference-P2
+		return -p1, -p2, true
+	case 7: // reference-P1 .. reference+P2
+		return -p1, p2, true
+	case 2, 3, 4, 5: // reference+P1 .. reference+P2
+		return p1, p2, true
+	default: // 0, 1, 10, 51, 113-125, unknown: only P1 is well-defined
+		return p1, p1, true
+	}
+}
+
+// TimeRange2 returns P2 as a duration when the time-range unit has a fixed
+// duration. It is the raw building block StepRange uses; exposed because
+// table 5 variants outside the well-defined set still want P2's magnitude.
+func (p *Product) TimeRange2() (time.Duration, bool) {
+	unit, ok := timeRangeUnitDuration(p.TimeRangeUnit)
+	if !ok {
+		return 0, false
+	}
+	return time.Duration(p.P2) * unit, true
 }
 
 // LevelDescription renders the level as a readable string, e.g. "1000 hPa",

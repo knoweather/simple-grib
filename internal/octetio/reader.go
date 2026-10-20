@@ -73,3 +73,11 @@ func (r *Reader) F32(off int) (float32, error) {
 	}
 	return math.Float32frombits(u), nil
 }
+
+// Bytes 返回偏移 off 起的 n 个字节（引用底层数组，调用方只读）。
+func (r *Reader) Bytes(off, n int) ([]byte, error) {
+	if err := r.check(off, n); err != nil {
+		return nil, err
+	}
+	return r.b[off : off+n], nil
+}

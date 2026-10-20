@@ -1,0 +1,82 @@
+# paramdata 来源与刷新
+
+本目录 vendored 自 ECMWF ecCodes 的 definitions 概念子集，是 paramdb 包
+（shortName / name / paramId / units / typeOfLevel 概念表）的生成输入，
+由 cmd/paramgen 解析为 paramdb/concepts_gen.go。
+
+- 上游：https://github.com/ecmwf/eccodes
+- 版本：tag 2.50.0（commit d7c8b65bceae1d77c14f1449d7f0a5a29efd005f，2026-10-14）
+- 抓取：git clone --depth 1 --branch 2.50.0 --filter=blob:none --sparse，
+  sparse-checkout definitions
+- 许可：Apache Licence 2.0（ecCodes）
+
+## 包含的文件
+
+grib2/
+  shortName.def / name.def / paramId.def / units.def
+      master 概念（masterTablesVersionNumber >= 34，MTG2 后编码）
+  *.lte33.def
+      masterTablesVersionNumber <= 33（MTG2 前）使用的变体
+  *.legacy.def
+      更早编码的兜底条目
+  typeOfLevelConcept.def
+      typeOfLevel 概念（固定面类型 → isobaricInhPa / surface / …）
+  localConcepts/<centre>/{shortName,name,paramId,units}{,.lte33,.legacy}.def
+      各中心本地概念（ecmf、edzw、kwbc、eswi、cnmc、…）。只保留四个
+      参数概念相关的文件，其余（cfName、chem、marsLevtype 等）未包含。
+
+grib1/
+  shortName.def / name.def / paramId.def / units.def
+      WMO 表 2 版本 1-3 的概念（396 个参数）
+  typeOfLevel.def
+      GRIB1 typeOfLevel（indicatorOfTypeOfLevel → 名字）
+  localConcepts/<centre>/shortName.def / name.def / paramId.def / units.def
+      各中心本地概念（ammc、cnmc、ecmf、edzw、efkl、eidb、ekmi、enmi、
+      eswi、kwbc、lfpw、lowm、rjtd、sbsj 共 14 个中心）。提供 GRIB1
+      中心参数的逐字 name 与 paramId（.table 文件没有 paramId 列）。
+  2.<centre>.<version>.table
+      中心本地 GRIB1 参数表（code、shortname、"name (unit)"），
+      覆盖 ECMWF 128/173 等 47 张表。仅作为没有 localConcepts 文件的
+      中心的显示名兜底（name 等于 ecCodes 的 parameterName）。
+      2.<version>.table（无中心号，code table 2 旗标类文件）与
+      0.<centre>.table 不属于参数表，未包含。
+  local*.def
+      本地定义模板（local.<centre>.def、local.<centre>.<N>.def 等）。
+      用途见下面「MARS 标签门控」。
+  mars_labeling*.def
+      被上面模板 template 引用的 MARS 标签定义，同样只用于门控推导。
+
+MARS 标签门控（grib1/local*.def + grib1/mars_labeling*.def）
+    marsClass / marsType / marsStream / experimentVersionNumber 不是每条消息
+    都有：ecCodes 只在声明了它们的本地定义模板里提供，读消息的一方必须按同一
+    规则门控，否则会把普通字节误读成 MARS 值。cmd/paramgen 沿模板的
+    `template` 引用递归解析这批 .def，找出其中出现 `codetable[..] marsClass`
+    的模板，生成 grib1/mars_gen.go（按本地定义号）与 mars_gen.go（GRIB2，
+    按中心）。这批 .def 只为这个判定而 vendored，没有别的用途。
+
+common/
+  c-1.table
+      CCT-1 中心表（中心号 ↔ 助记符）。paramgen 用它把
+      localConcepts/<助记符>/ 目录映射到中心号，从而把本地概念条目
+      按消息中心圈定（ecCodes 的 conceptsLocalDirAll="…/[centre:s]"）。
+
+grib2/ 下的 MARS 门控文件
+  local*.def
+      section 2 的本地定义模板（local.<centre>.def、local.<dataset>.<N>.def、
+      local.destine.*.def 等）。用途同 GRIB1 侧。
+  mars_labeling*.def
+      被上面模板 template 引用的 MARS 标签定义，同样只用于门控推导。
+
+## 刷新步骤
+
+1. `git ls-remote --tags https://github.com/ecmwf/eccodes` 选最新 tag；
+2. 稀疏克隆该 tag（命令同上），删除本目录内容并重新复制（文件清单见上）；
+3. 更新本文件的版本行与 commit；
+4. `go run ./cmd/paramgen -dir paramdata -out paramdb` 重新生成
+   （会同时写出 paramdb/concepts_gen.go、paramdb/mars_gen.go、
+   grib1/mars_gen.go、mars_gen.go 四个文件）；
+5. `go test ./paramdb/`——已知映射锚点测试（2t/10u/tp/msl/t 等）必须仍绿；
+   若锚点变值，那是上游语义变化，需人工确认后更新锚点；
+6. `go test ./...`——GRIB1/GRIB2 的 MARS 标签门控测试（grib1/mars_test.go、
+   mars_test.go）必须仍绿；若上游改了某个本地定义是否声明 mars_labeling，
+   生成物会变，那是预期行为，但需确认不是 vendored 子集复制不全。

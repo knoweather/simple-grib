@@ -296,4 +296,4 @@ Model credits:
  development possible
 - **[Qwen 3.8 Flash](https://github.com/QwenLM)** — open-source model,
  locally deployed
-- **[Tencent WorkBuddy](https://cloud.tencent.com/product/workbuddy)**
+- **[WorkBuddy](https://www.workbuddy.cn)**

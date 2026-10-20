@@ -1,11 +1,11 @@
 # research scratch (large HTML/JSON dumps; key evidence copied to docs/)
 .research/
 
-# AI-B working scratch
+# local working scratch
 .b-tmp/
 .smoke/
 
-# AI-A2 working scratch (P5-2 bench driver sources; canonical copy kept on the bench host under /root/a-p5)
+# bench driver scratch (canonical copy kept on the bench host under /root/a-p5)
 .a2-p5/
 
 # Go build artifacts
@@ -23,14 +23,18 @@ wasm/viewer.standalone.html
 # transfer bundles (transient sync artifacts)
 .tools-sync/
 
-# AI 助手工作区 / IDE / 本地实验数据与缓存（不入库）
+# 本地工作区 / IDE / 实验数据与缓存（不入库）
 .workbuddy-ai/
 .idea/
 .c38-exp/
 .m-realworld/
 .testcache/
 
-# 内部 AI 工作簿文档（不上传，仅本地）
+# 临时脚本与探针文件（验证脚本、ecCodes 探针等）
+tmp/
+_scratch_conceptcounts/
+
+# 本地工作笔记（不上传，仅本地）
 /COORDINATION.md
 /TODO.md
 /bug.md
