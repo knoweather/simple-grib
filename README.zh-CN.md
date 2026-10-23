@@ -1,17 +1,54 @@
 # simple-grib
 
-> [!NOTE]
-> 🚀 **首次发版，灰度测试中。** 有任何问题欢迎提 [issue](https://github.com/knoweather/simple-grib/issues)！
+纯 Go 的 **GRIB edition 1 + 2** 读写库 —— 零 cgo、不需要 eccodes、不需要 C 工具链。
+依赖只有标准库。元数据逐键对齐 ecCodes，数值逐位一致，同一份代码还能编译成 WebAssembly。
+
+<p>
+<a href="https://pkg.go.dev/github.com/knoweather/simple-grib"><img src="https://pkg.go.dev/badge/github.com/knoweather/simple-grib.svg" alt="Go Reference"></a>
+<a href="go.mod"><img src="https://img.shields.io/badge/go-1.27%2B-00ADD8?logo=go" alt="Go 1.27+"></a>
+<a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue" alt="MIT"></a>
+</p>
 
 **简体中文** | [English](./README.md)
 
-纯 Go 的 **GRIB edition 1 + 2**（WMO 气象数据格式）读写库。零 C 依赖：`CGO_ENABLED=0 go build ./...` 干净通过。[simple-netcdf](https://github.com/knoweather/simple-netcdf) 的姊妹项目。
+```go
+f, err := grib.Open("icon.grib2")
+if err != nil {
+    log.Fatal(err)
+}
+defer f.Close()
 
-GRIB1 支持（2026-10-15 落地）：`grib.Open` 自动按版本分派——GRIB1 消息走 `grib1/` 包解析（IS/PDS/GDS/BMS/BDS 五段、IBM 浮点参考值、符号-幅度比例因子、bitmap 展开、简单打包位流），坐标复用 GRIB2 侧已验证的坐标生成器（规则经纬 / 高斯 / 旋转经纬 / 极射赤面 / 兰勃特 / 准规则）；GRIB1 与 GRIB2 可混装在同一文件。GRIB1 数值原生精度是 float64（`Message.Values64()`）。参数名要按 (中心, 表版本) 注册表 2（`grib1.RegisterTable2`）才有值。
+for m, err := range f.Messages() {
+    if err != nil {
+        log.Fatal(err)
+    }
+    p, _ := m.Product()
+    q, _ := paramdb.QueryFrom(m)
+    fmt.Println(p.ParameterName, paramdb.ShortNameOrUnknown(q), paramdb.UnitsOrUnknown(q))
+}
+// Temperature t K
+```
 
-- **Spec-as-data**：规范数据（429+ 张代码表、254 个模板描述符）直接生成自 WMO 官方机器可读 CSV（`specdata/`，含 provenance 戳），正确性由数据保证，不靠手抄常量
-- **真实语料位级验证**：解码结果与 eccodes 在 CMA/ECMWF/GFS/JMA/ICON 等真实文件上逐点对拍（见[正确性](#正确性)）
-- **fail-loud 契约**：未知模板、local-use 值、损坏/截断、非 GRIB（GRIB3/BUFR）→ 带上下文的错误，永不 panic、永不静默
+- **与 ecCodes 一致的元数据**：`shortName` / `name` / `paramId` / `units` /
+  `typeOfLevel` / `parameterName` 由 vendored ecCodes 定义生成的概念链回答（本地中心 →
+  master → ecmf → legacy，平手取 master；表 4.2 与表 2 都按消息自己的表版本取值），
+  不是手写映射表。
+- **数值逐位一致**：CMA LARP 四锚点 442 消息（358M 值）+ data_snd 11 件 1109 消息
+  （788.8M 值，含 CCSDS 156/156、simple packing 69/69）与 eccodes 的 SHA-256 相同；
+  JPEG 2000 另与 Jasper 解码器交叉验证。
+- **GRIB1 / GRIB2 同一套 API**：`grib.Open` 按 edition 自动分派，GRIB1 保留原生
+  `float64` 精度（`Message.Values64()`），同一文件可混装。
+- **WASM 可用**：`wasm/` 可构建 `grib.wasm` 与浏览器查看器，无需服务器、无需 C 工具链
+  （`CGO_ENABLED=0 go build ./...` 通过）。
+
+> [!NOTE]
+> 🚀 **首次发版，灰度测试中。** 有任何问题欢迎提 [issue](https://github.com/knoweather/simple-grib/issues)！
+
+[simple-netcdf](https://github.com/knoweather/simple-netcdf) 的姊妹项目。
+
+## GRIB1
+
+2026-10-15 落地。`grib.Open` 自动按版本分派——GRIB1 消息走 `grib1/` 包解析（IS/PDS/GDS/BMS/BDS 五段、IBM 浮点参考值、符号-幅度比例因子、bitmap 展开、简单打包位流），坐标复用 GRIB2 侧已验证的坐标生成器（规则经纬 / 高斯 / 旋转经纬 / 极射赤面 / 兰勃特 / 准规则）；GRIB1 与 GRIB2 可混装在同一文件。GRIB1 数值原生精度是 float64（`Message.Values64()`）。GRIB1 的 `ParameterName` 默认按内置的 `grib1/2.<centre>.<version>.table` 取值——选表规则与 ecCodes 的 `codetable_title` 一致（`table2Version < 128` 走 WMO 表、`>= 128` 用消息的中心、`centre != 98 && subCentre == 98` 时改用 subCentre；表里没有该码时退化成十进制码字符串），`grib1.RegisterTable2` 仍可覆盖它。GRIB2 的 `ParameterName` 同理取自表 4.2 题名（`spec/paramname_gen.go`，按消息的表版本选择并钳制到最新版本）。
 
 ## 特性
 
@@ -186,7 +223,7 @@ python3 -u bench/p7_decode_bench/eccodes_bench.py --rounds 10 <files...> > py_re
 
 设计要点（Spec-as-data / 解析解释分离 / 三层分离 / 优雅降级 / 写入对称，详见要点描述）：
 
-1. **Spec-as-data**——WMO CSV 是唯一事实源；`cmd/specgen` 生成 `spec/tables_gen.go` + `templates_gen.go`（带 provenance 戳），`-check` 检测漂移；每次 WMO 修订 = 重同步 + 重生成，流程可审计。
+1. **Spec-as-data**——WMO CSV 加上 vendored 的 ecCodes definitions（见 `paramdata/PROVENANCE.txt`）是唯一事实源；`cmd/specgen` 生成 `spec/tables_gen.go` + `templates_gen.go` + `paramname_gen.go`（带版本的表 4.2 标题池），`cmd/paramgen` 生成概念 / MARS / GRIB1 表 2 数据（`paramdb/concepts_gen.go`、`paramdb/mars_gen.go`、`grib1/mars_gen.go`、`grib1/table2_gen.go`、`mars_gen.go`），两者都有 `-check` 漂移检测；每次 WMO/ecCodes 修订 = 重同步 + 重生成，流程可审计。
 2. **解析与解释分离**——一个通用模板引擎（`Walk`）按生成的描述符解析全部 254 个模板；语义解释（网格坐标、打包解码）只在需要的地方按模板号实现，未实现的暴露原始字段而不是失败。
 3. **三层分离**——L1 线格式（节/字节/位）→ L2 结构（模板/代码表，纯数据）→ L3 语义（grid/pack/Product），每层可独立测试。
 4. **优雅降级是一等公民**——未知模板号、local-use 值 → typed 访问器返回带上下文的错误，raw 字段永远可达，永不 panic。

@@ -1,34 +1,71 @@
 # simple-grib
 
-> [!NOTE]
-> 🚀 **Initial release, canary testing in progress.** If you hit any problem, please open an [issue](https://github.com/knoweather/simple-grib/issues)!
+Pure-Go **GRIB edition 1 + 2** reader/writer — zero cgo, no eccodes, no C
+toolchain — the module depends on nothing but the standard library. Metadata
+tracks ecCodes key by key, decoded values are bit-exact, and the same code builds
+to WebAssembly.
+
+<p>
+<a href="https://pkg.go.dev/github.com/knoweather/simple-grib"><img src="https://pkg.go.dev/badge/github.com/knoweather/simple-grib.svg" alt="Go Reference"></a>
+<a href="go.mod"><img src="https://img.shields.io/badge/go-1.27%2B-00ADD8?logo=go" alt="Go 1.27+"></a>
+<a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue" alt="MIT"></a>
+</p>
 
 **English** | [简体中文](./README.zh-CN.md)
 
-A pure-Go library to read and write **GRIB edition 1 + 2** (the WMO meteorological
-data format). Zero C dependencies: `CGO_ENABLED=0 go build ./...` passes clean.
+```go
+f, err := grib.Open("icon.grib2")
+if err != nil {
+    log.Fatal(err)
+}
+defer f.Close()
+
+for m, err := range f.Messages() {
+    if err != nil {
+        log.Fatal(err)
+    }
+    p, _ := m.Product()
+    q, _ := paramdb.QueryFrom(m)
+    fmt.Println(p.ParameterName, paramdb.ShortNameOrUnknown(q), paramdb.UnitsOrUnknown(q))
+}
+// Temperature t K
+```
+
+- **ecCodes-compatible metadata**: `shortName` / `name` / `paramId` / `units` /
+  `typeOfLevel` / `parameterName` are answered by the concept chain generated from
+  the vendored ecCodes definitions (local centre → master → ecmf → legacy, ties to
+  master; table 4.2 and table 2 lookups take the message's own table version) —
+  not by a hand-written map.
+- **Bit-exact values**: CMA LARP four anchors, 442 messages (358M values) +
+  data_snd 11 files, 1109 messages (788.8M values, incl. CCSDS 156/156 and simple
+  packing 69/69) hash-identical to eccodes; JPEG 2000 is cross-checked against
+  Jasper's own decoder.
+- **Editions 1 and 2, one API**: `grib.Open` dispatches by edition, GRIB1 keeps
+  native `float64` precision (`Message.Values64()`), and one file may mix both.
+- **WASM ready**: `wasm/` builds `grib.wasm` plus a browser viewer — no server,
+  no C toolchain (`CGO_ENABLED=0 go build ./...` passes).
+
+> [!NOTE]
+> 🚀 **Initial release, canary testing in progress.** If you hit any problem, please open an [issue](https://github.com/knoweather/simple-grib/issues)!
+
 A sibling project of [simple-netcdf](https://github.com/knoweather/simple-netcdf).
 
-GRIB1 support (landed 2026-10-15): `grib.Open` dispatches automatically by
-edition — GRIB1 messages are parsed by the `grib1/` package (five sections
-IS/PDS/GDS/BMS/BDS, IBM-float reference value, sign-magnitude scale factors,
-bitmap expansion, simple-packed bit stream), reusing the grid-coordinate
-generators already verified on the GRIB2 side (regular lat/lon, Gaussian,
-rotated lat/lon, polar stereographic, Lambert conformal, quasi-regular);
-GRIB1 and GRIB2 messages may be mixed within one file. GRIB1 values keep
-native float64 precision (`Message.Values64()`); parameter names resolve once
-a table 2 is registered per (centre, table version) via `grib1.RegisterTable2`.
+## GRIB1
 
-- **Spec-as-data**: the spec data (429+ code tables, 254 template descriptors)
- is generated directly from the official WMO machine-readable CSVs
- (`specdata/`, provenance-stamped) — correctness comes from the data, not
- from hand-copied constants
-- **Bit-level verification on real corpora**: decoded values are compared
- point by point with eccodes on real CMA/ECMWF/GFS/JMA/ICON files
- (see [Correctness](#correctness))
-- **fail-loud contract**: unknown templates, local-use values, damaged or
- truncated files, non-GRIB (GRIB3/BUFR) → contextual errors; never panics,
- never stays silent
+Landed 2026-10-15. `grib.Open` dispatches automatically by edition — GRIB1
+messages are parsed by the `grib1/` package (five sections IS/PDS/GDS/BMS/BDS,
+IBM-float reference value, sign-magnitude scale factors, bitmap expansion,
+simple-packed bit stream), reusing the grid-coordinate generators already
+verified on the GRIB2 side (regular lat/lon, Gaussian, rotated lat/lon, polar
+stereographic, Lambert conformal, quasi-regular);
+GRIB1 and GRIB2 messages may be mixed within one file. GRIB1 values keep
+native float64 precision (`Message.Values64()`). `Product.ParameterName` resolves
+against the vendored per-(centre, table version) table 2 — same selection as
+ecCodes' `grib1/2.[centre].[table2Version].table` accessor: `table2Version <
+128` routes to the WMO tables (the centre segment is ignored), `>= 128` uses
+the message's centre (`subCentre == 98` taking over when the centre is not
+98), and a missing table or code degrades to the decimal code string exactly
+like ecCodes' `codetable_title`; `grib1.RegisterTable2` still overrides it.
 
 ## Features
 
@@ -228,10 +265,14 @@ side (that binding build has no next-message API).
 Key principles (spec-as-data / parse–interpret split / three-layer separation
 / graceful degradation / symmetric write):
 
-1. **Spec-as-data** — the WMO CSVs are the single source of truth;
- `cmd/specgen` generates `spec/tables_gen.go` + `templates_gen.go`
- (provenance-stamped), `-check` detects drift; every WMO revision =
- re-sync + regenerate, with an auditable workflow.
+1. **Spec-as-data** — the WMO CSVs plus the vendored ecCodes definitions
+ (see `paramdata/PROVENANCE.txt`) are the single source of truth;
+ `cmd/specgen` generates `spec/tables_gen.go` + `templates_gen.go` +
+ `paramname_gen.go` (the versioned 4.2 title pool), `cmd/paramgen` generates
+ the concept / MARS / GRIB1 table-2 data (`paramdb/concepts_gen.go`,
+ `paramdb/mars_gen.go`, `grib1/mars_gen.go`, `grib1/table2_gen.go`,
+ `mars_gen.go`), and both have `-check` drift detection; every WMO/ecCodes
+ revision = re-sync + regenerate, with an auditable workflow.
 2. **Parse–interpret split** — one generic template engine (`Walk`) parses all
  254 templates from the generated descriptors; semantic interpretation
  (grid coordinates, packing decode) is implemented per template number only
