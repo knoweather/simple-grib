@@ -39,12 +39,16 @@ jobs:
         shell: bash
         run: |
           set -o pipefail
+          echo "go version: $(go version)"
           go test -count=1 ./... 2>&1 | tee test-output.txt
           rc=$?
           if [ "$rc" -ne 0 ]; then
-            # Failures as check annotations: they stay readable without a token.
-            grep -E "^(--- FAIL|FAIL|panic:|.*_test\.go:[0-9]+:)" test-output.txt | head -50 | \
-              while IFS= read -r line; do echo "::error title=go test::${line}"; done
+            # Re-emit the interesting output as check annotations: they are
+            # readable through the public API, job logs are not.
+            grep -vE '^(ok|\?) ' test-output.txt | head -60 | while IFS= read -r line; do
+              echo "::error file=.github/workflows/ci.yml,line=1::${line}"
+            done
+            echo "::error file=.github/workflows/ci.yml,line=1::go test exited with ${rc}"
           fi
           exit "$rc"
 
