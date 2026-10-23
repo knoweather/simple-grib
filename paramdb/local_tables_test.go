@@ -8,7 +8,7 @@ import "testing"
 // 带 localTablesVersion=1 的查询必须命中 ecmf 本地表（sro 等），
 // 而 localTablesVersion=0 时不应命中那条（条件要求 =1）。
 //
-// Expectations come from ecCodes 2.47.0 (tmp/verify_ecmf_local.py):
+// Expectations come from ecCodes 2.47.0:
 //
 //	sro  -> shortName 'sro',  name 'Surface runoff',                  paramId 8
 //	ssro -> shortName 'ssro', name 'Sub-surface runoff',              paramId 9
