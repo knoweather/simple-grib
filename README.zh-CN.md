@@ -1,9 +1,10 @@
-# simple-grib
+<p align="center">
+  <img src="docs/gopher.svg" width="112" alt="The Go gopher, holding a network cable">
+</p>
 
-纯 Go 的 **GRIB edition 1 + 2** 读写库 —— 零 cgo、不需要 eccodes、不需要 C 工具链。
-依赖只有标准库。元数据逐键对齐 ecCodes，数值逐位一致，同一份代码还能编译成 WebAssembly。
+<h1 align="center">simple-grib</h1>
 
-<p>
+<p align="center">
 <a href="https://github.com/knoweather/simple-grib/actions/workflows/ci.yml"><img src="https://github.com/knoweather/simple-grib/actions/workflows/ci.yml/badge.svg?branch=main" alt="CI"></a>
 <a href="https://goreportcard.com/report/github.com/knoweather/simple-grib"><img src="https://goreportcard.com/badge/github.com/knoweather/simple-grib" alt="Go Report Card"></a>
 <a href="https://scorecard.dev/viewer/?uri=github.com/knoweather/simple-grib"><img src="https://img.shields.io/ossf-scorecard/github.com/knoweather/simple-grib?label=openssf%20scorecard" alt="OpenSSF Scorecard"></a>
@@ -15,7 +16,10 @@
 <img src="https://img.shields.io/badge/WASM-browser%20%26%20node-blueviolet" alt="WASM">
 </p>
 
-**简体中文** | [English](./README.md)
+<p align="center"><a href="./README.md">English</a> | <strong>简体中文</strong></p>
+
+纯 Go 的 **GRIB edition 1 + 2** 读写库 —— 零 cgo、不需要 eccodes、不需要 C 工具链。
+依赖只有标准库。元数据逐键对齐 ecCodes，数值逐位一致，同一份代码还能编译成 WebAssembly。
 
 ```go
 f, err := grib.Open("icon.grib2")
@@ -270,3 +274,10 @@ L1 线格式层 File（io.ReaderAt + 消息索引）→ Message（整条缓冲�
  [OpenCode](https://opencode.ai) 提供的免费额度，促成了本次开发
 - **[Qwen 3.8 Flash](https://github.com/QwenLM)** — 开源模型，本地部署运行
 - **[WorkBuddy](https://www.workbuddy.cn)**
+
+## 致谢
+
+Go gopher 由 [Renee French](https://reneefrench.blogspot.com/) 设计，采用
+[CC BY 3.0](https://creativecommons.org/licenses/by/3.0/) 许可；
+[`docs/gopher.svg`](docs/gopher.svg) 里的这幅画由
+[Egon Elbre](https://github.com/egonelbre/gophers) 绘制，以 CC0 发布。

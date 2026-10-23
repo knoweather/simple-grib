@@ -1,11 +1,10 @@
-# simple-grib
+<p align="center">
+  <img src="docs/gopher.svg" width="112" alt="The Go gopher, holding a network cable">
+</p>
 
-Pure-Go **GRIB edition 1 + 2** reader/writer — zero cgo, no eccodes, no C
-toolchain — the module depends on nothing but the standard library. Metadata
-tracks ecCodes key by key, decoded values are bit-exact, and the same code builds
-to WebAssembly.
+<h1 align="center">simple-grib</h1>
 
-<p>
+<p align="center">
 <a href="https://github.com/knoweather/simple-grib/actions/workflows/ci.yml"><img src="https://github.com/knoweather/simple-grib/actions/workflows/ci.yml/badge.svg?branch=main" alt="CI"></a>
 <a href="https://goreportcard.com/report/github.com/knoweather/simple-grib"><img src="https://goreportcard.com/badge/github.com/knoweather/simple-grib" alt="Go Report Card"></a>
 <a href="https://scorecard.dev/viewer/?uri=github.com/knoweather/simple-grib"><img src="https://img.shields.io/ossf-scorecard/github.com/knoweather/simple-grib?label=openssf%20scorecard" alt="OpenSSF Scorecard"></a>
@@ -17,7 +16,12 @@ to WebAssembly.
 <img src="https://img.shields.io/badge/WASM-browser%20%26%20node-blueviolet" alt="WASM">
 </p>
 
-**English** | [简体中文](./README.zh-CN.md)
+<p align="center"><strong>English</strong> | <a href="./README.zh-CN.md">简体中文</a></p>
+
+Pure-Go **GRIB edition 1 + 2** reader/writer — zero cgo, no eccodes, no C
+toolchain — the module depends on nothing but the standard library. Metadata
+tracks ecCodes key by key, decoded values are bit-exact, and the same code builds
+to WebAssembly.
 
 ```go
 f, err := grib.Open("icon.grib2")
@@ -344,3 +348,10 @@ Model credits:
 - **[Qwen 3.8 Flash](https://github.com/QwenLM)** — open-source model,
  locally deployed
 - **[WorkBuddy](https://www.workbuddy.cn)**
+
+## Credits
+
+The Go gopher was designed by [Renee French](https://reneefrench.blogspot.com/) and is
+licensed under [CC BY 3.0](https://creativecommons.org/licenses/by/3.0/). The drawing in
+[`docs/gopher.svg`](docs/gopher.svg) is by
+[Egon Elbre](https://github.com/egonelbre/gophers) and released under CC0.
