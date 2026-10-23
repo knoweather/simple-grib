@@ -4,9 +4,13 @@
 依赖只有标准库。元数据逐键对齐 ecCodes，数值逐位一致，同一份代码还能编译成 WebAssembly。
 
 <p>
+<a href="https://github.com/knoweather/simple-grib/actions/workflows/ci.yml"><img src="https://github.com/knoweather/simple-grib/actions/workflows/ci.yml/badge.svg?branch=main" alt="CI"></a>
 <a href="https://pkg.go.dev/github.com/knoweather/simple-grib"><img src="https://pkg.go.dev/badge/github.com/knoweather/simple-grib.svg" alt="Go Reference"></a>
-<a href="go.mod"><img src="https://img.shields.io/badge/go-1.27%2B-00ADD8?logo=go" alt="Go 1.27+"></a>
-<a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue" alt="MIT"></a>
+<a href="go.mod"><img src="https://img.shields.io/github/go-mod/go-version/knoweather/simple-grib" alt="Go version"></a>
+<a href="LICENSE"><img src="https://img.shields.io/github/license/knoweather/simple-grib" alt="License"></a>
+<a href="https://github.com/knoweather/simple-grib/tags"><img src="https://img.shields.io/github/v/tag/knoweather/simple-grib?sort=semver" alt="Latest tag"></a>
+<img src="https://img.shields.io/badge/CGO-disabled-success" alt="CGO disabled">
+<img src="https://img.shields.io/badge/WASM-browser%20%26%20node-blueviolet" alt="WASM">
 </p>
 
 **简体中文** | [English](./README.md)
