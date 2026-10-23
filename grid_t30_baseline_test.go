@@ -119,11 +119,12 @@ func TestB_GridT30Baseline(t *testing.T) {
 	// packed float64 BE sha256 — Go-column anchor (dual-column convention,
 	// see header; eccodes reference column replayable via the oracle script).
 	// 2026-10-13 重锚 go1.27.1（go1.25.4/1.26.5/1.27.1 实测同值）。
+	t.Logf("lats=%s lons=%s", baselineF64beDigest(lats), baselineF64beDigest(lons))
 	if got := baselineF64beDigest(lats); !knownLatsDigest(got) {
-		t.Fatalf("lats packed f64 BE sha256 = %s, want 70618c3c… (Go-column anchor, go1.27.1)", got)
+		t.Errorf("lats packed f64 BE sha256 = %s, want 70618c3c… (Go-column anchor, go1.27.1)", got)
 	}
 	if got := baselineF64beDigest(lons); !knownLonsDigest(got) {
-		t.Fatalf("lons packed f64 BE sha256 = %s, want e1c1917a… (Go-column anchor, go1.27.1)", got)
+		t.Errorf("lons packed f64 BE sha256 = %s, want e1c1917a… (Go-column anchor, go1.27.1)", got)
 	}
 
 	// sanity: Lats/Lons[i] == Point(i) for a few indices (per-point consistency).
@@ -154,6 +155,7 @@ var (
 	knownLatsDigests = map[string]string{
 		"70618c3cc46955b32c8c4ed7389480b3b95e1216fd8e24c846a257de94457452": "GOAMD64>=v3 (FMA)",
 		"59036630ff4d8556efa1e0dbc63a0ec7efe709baa37fda0b35fdd8983cb017cf": "GOAMD64=v1 (CI default)",
+		"9f72b471e72588a34fdc19ffc4ee0f541e3c005a9e48aca63db5fd3f3e985d20": "darwin/arm64",
 	}
 	knownLonsDigests = map[string]string{
 		"e1c1917a1a4441e4086c7c2ebdf7d63c076b6d223eab1a7be7a027f6d6e347ba": "GOAMD64>=v3 (FMA)",

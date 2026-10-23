@@ -127,11 +127,12 @@ func TestB_C38EndToEnd(t *testing.T) {
 
 	// packed float64 BE sha256 位级硬门（Go 列锚；2026-10-13 按 go1.27.1 重锚，
 	// go1.25.4/1.26.5/1.27.1 实测同值。eccodes 参考列见头注双列口径。）
+	t.Logf("lats=%s lons=%s", f64beDigest(t, lats), f64beDigest(t, lons))
 	if got := f64beDigest(t, lats); !knownLatsDigest(got) {
-		t.Fatalf("lats packed f64 BE sha256 = %s, want 70618c3c…（Go 列锚, go1.27.1）", got)
+		t.Errorf("lats packed f64 BE sha256 = %s, want 70618c3c…（Go 列锚, go1.27.1）", got)
 	}
 	if got := f64beDigest(t, lons); !knownLonsDigest(got) {
-		t.Fatalf("lons packed f64 BE sha256 = %s, want e1c1917a…（Go 列锚, go1.27.1）", got)
+		t.Errorf("lons packed f64 BE sha256 = %s, want e1c1917a…（Go 列锚, go1.27.1）", got)
 	}
 }
 
