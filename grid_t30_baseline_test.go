@@ -119,10 +119,10 @@ func TestB_GridT30Baseline(t *testing.T) {
 	// packed float64 BE sha256 — Go-column anchor (dual-column convention,
 	// see header; eccodes reference column replayable via the oracle script).
 	// 2026-10-13 重锚 go1.27.1（go1.25.4/1.26.5/1.27.1 实测同值）。
-	if got := baselineF64beDigest(lats); got != "70618c3cc46955b32c8c4ed7389480b3b95e1216fd8e24c846a257de94457452" {
+	if got := baselineF64beDigest(lats); !knownLatsDigest(got) {
 		t.Fatalf("lats packed f64 BE sha256 = %s, want 70618c3c… (Go-column anchor, go1.27.1)", got)
 	}
-	if got := baselineF64beDigest(lons); got != "e1c1917a1a4441e4086c7c2ebdf7d63c076b6d223eab1a7be7a027f6d6e347ba" {
+	if got := baselineF64beDigest(lons); !knownLonsDigest(got) {
 		t.Fatalf("lons packed f64 BE sha256 = %s, want e1c1917a… (Go-column anchor, go1.27.1)", got)
 	}
 
@@ -146,3 +146,20 @@ func baselineF64beDigest(a []float64) string {
 	sum := sha256.Sum256(buf)
 	return fmt.Sprintf("%x", sum)
 }
+
+// Go 列锚随 GOAMD64 变化：支持 FMA 的构建（GOAMD64>=v3，开发机常见）与默认
+// v1（GitHub Actions runner）在浮点末尾几位上会给出不同结果。两套口径都接受，
+// 其它任何漂移仍然会让测试失败。数值见 grid_t30_baseline_test.go 的头注。
+var (
+	knownLatsDigests = map[string]string{
+		"70618c3cc46955b32c8c4ed7389480b3b95e1216fd8e24c846a257de94457452": "GOAMD64>=v3 (FMA)",
+		"59036630ff4d8556efa1e0dbc63a0ec7efe709baa37fda0b35fdd8983cb017cf": "GOAMD64=v1 (CI default)",
+	}
+	knownLonsDigests = map[string]string{
+		"e1c1917a1a4441e4086c7c2ebdf7d63c076b6d223eab1a7be7a027f6d6e347ba": "GOAMD64>=v3 (FMA)",
+		"b71ed5c9fa7b6c58b51abbbdb1d41729bc7da99957fe8720650c7bfa6b6ab6b8": "GOAMD64=v1",
+	}
+)
+
+func knownLatsDigest(got string) bool { return knownLatsDigests[got] != "" }
+func knownLonsDigest(got string) bool { return knownLonsDigests[got] != "" }
