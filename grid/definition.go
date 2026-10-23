@@ -107,6 +107,18 @@ type Definition struct {
 	resFlags  uint8
 	scanMode  uint8
 
+	// hasCorners records that La1/Lo1/La2/Lo2 were decoded from a template
+	// that carries them (GRIB2 3.0-3.3/3.40-3.41, GRIB1 types 0/4/10).
+	// Bounds() reports ok=false otherwise, so a zero-valued La1/Lo1 of a
+	// projection template is never mistaken for an encoded corner.
+	hasCorners bool
+
+	// reducedGauss marks the metadata-only reduced Gaussian case: GRIB2
+	// template 3.40/3.41 with Ni or Nj encoded as missing. Coordinates are
+	// withheld (kindNone); Bounds/GaussianN/NumPointsDeclared carry the
+	// metadata. See IsReducedGaussian.
+	reducedGauss bool
+
 	// quasi-regular (kindReduced)
 	reduced *reducedParams
 
@@ -240,7 +252,44 @@ func (g *Definition) resolve() error {
 		switch {
 		case quasi:
 			if gauss {
-				return fmt.Errorf("grid: template %d: quasi-regular Gaussian grid (Ni or Nj missing) not supported in P1", tmpl)
+				// Reduced Gaussian (WMO Note 15 / ecCodes gridType
+				// "reduced_gg"): exactly one of Ni/Nj is all-ones and the
+				// real geometry lives in a per-row/column point-count list.
+				// In the real ECMWF files (reduced_gg) Ni is the missing
+				// field and Nj is the number of latitude circles in the
+				// region; the list holds the point count of each circle.
+				//
+				// Coordinates are withheld in this stage (kindNone: Point/
+				// Lats/Lons report ErrNotImplemented) because the enumerate
+				// is genuinely not implemented: the row latitudes cannot come
+				// from La1->La2 interpolation, they must be the Gaussian
+				// parallels selected by N (octets 68-71) through
+				// resolveGaussianWindow, and every row carries its own point
+				// count from the point list — neither fits the Ni×Nj
+				// generator this package has. Keeping the definition
+				// metadata-only is deliberate: a real regional reduced
+				// Gaussian file must not make the whole GRIB file unreadable
+				// (callers enumerate messages and read the first message's
+				// grid), and the encoded metadata — template number, Ni/Nj,
+				// N, the corners (Bounds) and the declared point count
+				// (NumPointsDeclared) — is exactly what ecCodes reports for
+				// these files.
+				//
+				// No Gaussian window/consistency validation happens on this
+				// branch, on purpose. resolveGaussianWindow needs
+				// O((2N)^2) root finding, requires La1 to sit on a parallel
+				// within 1e-6 deg, and requires the Nj-row window to fit in
+				// 2N; real producers store the corners rounded to the file's
+				// angle unit, so any of those checks can fail on a perfectly
+				// readable file. Geometry we never enumerate must not gate
+				// metadata. On the coordinate path (kindGaussian below) the
+				// same checks stay fail-loud, unchanged.
+				if n, err := g.u32(67); err == nil && n != missingU32 && n != 0 && n <= maxGaussianN {
+					g.gaussN = int(n)
+				}
+				g.kind = kindNone
+				g.reducedGauss = true
+				break
 			}
 			if err := g.parseReduced(); err != nil {
 				return err
@@ -414,6 +463,9 @@ func (g *Definition) parseLatLonBase() error {
 	if err != nil {
 		return err
 	}
+	// All four encoded corners are decoded: Bounds() is available from here
+	// on (for every template that reaches this function).
+	g.hasCorners = true
 	diRaw, err := g.u32(63) // octets 64-67
 	if err != nil {
 		return err
@@ -450,11 +502,22 @@ func (g *Definition) parseLatLonBase() error {
 		djGiven = false
 	}
 
-	nii, nji := int(ni), int(nj)
+	nii, nji := countOrZero(ni), countOrZero(nj)
+	quasiCount := ni == missingU32 || nj == missingU32
 	if diGiven {
 		g.Di = float64(diRaw) * unit
 	} else if nii > 1 {
 		g.Di = math.Abs(g.Lo2-g.Lo1) / float64(nii-1) // default for a missing increment
+	} else if quasiCount {
+		// Quasi-regular grids place rows/columns from the corner span plus the
+		// point-count list (reducedPoints) and never use Di/Dj, so a missing
+		// increment is not an error for them. Keeping this branch error-free is
+		// what makes the metadata fallback unconditional: on 64-bit ints the
+		// all-ones sentinel happened to survive as a nonsensical ~1e-9 deg
+		// increment, but on 32-bit ints int(0xFFFFFFFF) is -1 and the
+		// derivation below would reject a readable file (reduced Gaussian
+		// templates have a missing Ni or Nj and usually a missing Di).
+		g.Di = 0
 	} else {
 		return fmt.Errorf("grid: template %d: i increment missing and Ni=%d, cannot derive Di", g.templateNumber, nii)
 	}
@@ -462,6 +525,8 @@ func (g *Definition) parseLatLonBase() error {
 		g.Dj = float64(djRaw) * unit
 	} else if nji > 1 {
 		g.Dj = math.Abs(g.La2-g.La1) / float64(nji-1) // default for a missing increment
+	} else if quasiCount {
+		g.Dj = 0 // see the Di branch above
 	} else {
 		return fmt.Errorf("grid: template %d: j increment missing and Nj=%d, cannot derive Dj", g.templateNumber, nji)
 	}
@@ -580,6 +645,19 @@ func (g *Definition) u32(off int) (uint32, error) {
 	return v, nil
 }
 
+// countOrZero maps a cardinal field whose all-ones value is the WMO "missing"
+// sentinel to 0, passing any other value through. Counts used in arithmetic
+// (the missing-increment default algorithm) must never see the sentinel:
+// int(0xFFFFFFFF) is 4294967295 on 64-bit ints — a nonsense count — and -1 on
+// 32-bit ones, where it used to turn a readable quasi-regular grid into an
+// error.
+func countOrZero(v uint32) int {
+	if v == missingU32 {
+		return 0
+	}
+	return int(v)
+}
+
 // angleUnit returns the angular unit for scaled-angle fields: the degrees
 // per stored unit from basicAngle (octets 39-42) divided by subdivisions
 // (octets 43-46). Defaults per the specification: a basicAngle of 0 treats
@@ -659,6 +737,62 @@ func (g *Definition) SourceOfGridDefinition() int { return g.source }
 
 func (g *Definition) NumPointsDeclared() int { return g.declared }
 
+// Bounds returns the encoded grid corners in degrees, in the order
+// (lat1, lon1, lat2, lon2) — the first and last grid point of the grid
+// definition, decoded straight from the template fields with no scan-mode or
+// quasi-regular processing. It is the semantic equivalent of ecCodes'
+// latitudeOfFirstGridPointInDegrees, longitudeOfFirstGridPointInDegrees,
+// latitudeOfLastGridPointInDegrees and longitudeOfLastGridPointInDegrees.
+//
+// ok is false when the template carries no corner fields at all: the
+// projections (3.20/3.30, which encode a projection origin instead), the
+// stretched Gaussian family 3.42/3.43 and templates this package does not
+// decode. The corner values are also parsed for GRIB1 types 0/4/10 (NewGRIB1).
+//
+// Bounds is the metadata path for grids whose coordinates are not
+// enumerated. For a regional reduced Gaussian grid (see IsReducedGaussian)
+// the encoded corners are all the geometry the file encodes without the
+// point list, so a caller can still report the lat/lon box — the same values
+// ecCodes gives for these files.
+func (g *Definition) Bounds() (lat1, lon1, lat2, lon2 float64, ok bool) {
+	if !g.hasCorners {
+		return 0, 0, 0, 0, false
+	}
+	return g.La1, g.Lo1, g.La2, g.Lo2, true
+}
+
+// IsReducedGaussian reports whether the definition is a reduced Gaussian grid
+// this package can currently describe as metadata only: GRIB2 template 3.40 or
+// 3.41 with Ni or Nj encoded as missing (WMO Note 15; ecCodes gridType
+// "reduced_gg"). Such a definition parses without error, reports its encoded
+// corners through Bounds and its Gaussian parameter through GaussianN, and
+// Point/Lats/Lons report ErrNotImplemented.
+//
+// Convention for these definitions, because the coordinate generator is
+// withheld: NumPoints() returns 0 (no point table can be built without the
+// per-row point counts and the N parallels), while NumPointsDeclared() still
+// returns the count encoded in section 3 octets 7-10 (e.g. 62644 or 8505906),
+// which is exactly ecCodes' numberOfPoints. Callers that need the grid size
+// must use NumPointsDeclared() for a reduced Gaussian grid.
+//
+// Quasi-regular grids whose point-count list this package does enumerate
+// (the 3.0-3.3 family) report IsQuasiRegular() instead, and never report
+// true here: this flag covers the GRIB2 templates 3.40/3.41 only.
+func (g *Definition) IsReducedGaussian() bool { return g.reducedGauss }
+
+// GaussianN returns the Gaussian parameter N of a template 3.40/3.41 grid:
+// the number of parallels from the pole to the equator, so the full grid has
+// 2N rows. N is read from octets 68-71 and is available both for enumerated
+// Gaussian grids and for metadata-only reduced Gaussian grids
+// (IsReducedGaussian).
+//
+// It returns 0 when N is not usable: the definition is not a 3.40/3.41 grid,
+// the field is missing (all-ones) or zero (Note 87 requires N, so such a file
+// is malformed), or the encoded value exceeds the supported maximum
+// maxGaussianN (2^15) — building a latitude list is O((2N)^2), so an
+// unbounded value is never handed out.
+func (g *Definition) GaussianN() int { return g.gaussN }
+
 func (g *Definition) ShapeOfEarth() int { return g.shape }
 
 // Radius returns the (effective) earth radius in metres. Fixed shapes return
@@ -729,6 +863,10 @@ func (g *Definition) ScanMode() uint8 { return g.scanMode }
 // quasi-regular sum(PL), Gaussian Ni×Nj, projected (3.20/3.30) Ni×Nj;
 // unimplemented templates give 0. The count has been validated in New()
 // against maxGridPoints, so it neither overflows nor is unbounded.
+//
+// A metadata-only reduced Gaussian grid (IsReducedGaussian) also returns 0:
+// its point table cannot be enumerated at this stage. For those the real
+// count is NumPointsDeclared() (section 3 octets 7-10).
 func (g *Definition) NumPoints() int {
 	switch g.kind {
 	case kindRegular, kindGaussian, kindProjected:
@@ -758,7 +896,10 @@ func (g *Definition) Point(i int) (float64, float64, error) {
 }
 
 // Lats/Lons return per-row latitudes / per-column longitudes for regular and
-// Gaussian grids; quasi-regular and unimplemented grids return an error.
+// Gaussian grids; quasi-regular grids return an error (their columns/rows are
+// not separable) and templates without a coordinate generator — including a
+// metadata-only reduced Gaussian, see IsReducedGaussian — report
+// ErrNotImplemented{Template}, the same error Point returns.
 // Projected grids (3.20/3.30) have no separable row/column structure:
 // Lats()/Lons() return the full per-point arrays in the specification data
 // order (length Ni×Nj, longitudes in [0,360), the ecCodes convention).
@@ -781,6 +922,9 @@ func (g *Definition) Lats() ([]float64, error) {
 		}
 		return out, nil
 	default:
+		if g.kind == kindNone {
+			return nil, &ErrNotImplemented{Template: g.templateNumber}
+		}
 		return nil, fmt.Errorf("grid: Lats not available for template %d (kind %v)", g.templateNumber, g.kind)
 	}
 }
@@ -804,6 +948,9 @@ func (g *Definition) Lons() ([]float64, error) {
 		}
 		return out, nil
 	default:
+		if g.kind == kindNone {
+			return nil, &ErrNotImplemented{Template: g.templateNumber}
+		}
 		return nil, fmt.Errorf("grid: Lons not available for template %d (kind %v)", g.templateNumber, g.kind)
 	}
 }

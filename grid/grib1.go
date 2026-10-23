@@ -144,6 +144,9 @@ func (g *Definition) parseGRIB1LatLon(reprType int) error {
 	g.resFlags = b[16]                                       // octet 17
 	g.La2 = float64(octetio.Smag24(b[17:20])) / grib1Divider // octets 18-20
 	g.Lo2 = float64(octetio.Smag24(b[20:23])) / grib1Divider // octets 21-23
+	// The four encoded corners are available (Bounds()); the GRIB2 side sets
+	// the same flag in parseLatLonBase.
+	g.hasCorners = true
 
 	// Di：unsigned[2]，1/1000 度。方向由扫描模式承载，所以这里只取幅值。
 	g.Di = float64(octetio.U16At(b, 23)) / grib1Divider // octets 24-25
