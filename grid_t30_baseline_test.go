@@ -160,6 +160,7 @@ var (
 	knownLonsDigests = map[string]string{
 		"e1c1917a1a4441e4086c7c2ebdf7d63c076b6d223eab1a7be7a027f6d6e347ba": "GOAMD64>=v3 (FMA)",
 		"b71ed5c9fa7b6c58b51abbbdb1d41729bc7da99957fe8720650c7bfa6b6ab6b8": "GOAMD64=v1",
+		"82c3c7fb1641be65893721432e91159b7c9230f28d5753f9fd1dc2e0d8673cbc": "darwin/arm64",
 	}
 )
 
