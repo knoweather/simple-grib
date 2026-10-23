@@ -40,8 +40,12 @@ jobs:
         run: |
           set -o pipefail
           echo "go version: $(go version)"
+          # Actions runs bash -e, which would abort on the failing go test before
+          # the output could be turned into annotations.
+          set +e
           go test -count=1 ./... 2>&1 | tee test-output.txt
           rc=$?
+          set -e
           if [ "$rc" -ne 0 ]; then
             # Re-emit the interesting output as check annotations: they are
             # readable through the public API, job logs are not.
