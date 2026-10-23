@@ -52,7 +52,10 @@ func TestDecodeBytesFull(t *testing.T) {
 	if m.Identification.ProductionStatusName == "" {
 		t.Error("productionStatusName 没查出来（表 1.3）")
 	}
-	if m.Product == nil || m.Product.ParameterName != "Temperature" {
+	// fixture 的 tablesVersion = 0（无该版本的表目录），ecCodes 的 parameterName
+	// 因此是十进制码 "0"，不是最新表的 "Temperature"（见 grib1_mixed_test.go 的
+	// TestMixedEditionFile 与 spec.ParameterNameFor 的文档）。
+	if m.Product == nil || m.Product.ParameterName != "0" {
 		t.Errorf("product 参数名不对: %+v", m.Product)
 	}
 	if m.Product.TemplateName == "" {
@@ -241,7 +244,9 @@ func TestToJSShape(t *testing.T) {
 	if got := grid.Get("lats").Index(0).Float(); math.Abs(got-45) > 1e-9 {
 		t.Errorf("lats[0] = %v，想要 45", got)
 	}
-	if got := m.Get("product").Get("parameterName").String(); got != "Temperature" {
+	// fixture 的 tablesVersion = 0（无该版本的表目录）：ecCodes 的 parameterName
+	// 退化成十进制码 "0"，不是最新表的 "Temperature"（见 spec.ParameterNameFor）。
+	if got := m.Get("product").Get("parameterName").String(); got != "0" {
 		t.Errorf("parameterName = %q", got)
 	}
 	// 统计对象要能直接被前端读走

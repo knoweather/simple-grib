@@ -496,7 +496,8 @@ func TestFailLoud(t *testing.T) {
 }
 
 func TestRegisterTable2(t *testing.T) {
-	// Unregistered table: the parameter name stays empty (never borrow another table).
+	// Built-in table: ecCodes 2.50's ECMWF table 128 names parameter 167
+	// "2 metre temperature" (verified against the oracle, see table2.go).
 	msg := buildMessage(t, pdsOpts{param: 167, tableVersion: 128, levelType: 100, level: 500, flags: pdsFlagGDS},
 		gdsLatLon(2, 2, 10, 20, 5, 25, 5, 5, 0), nil,
 		bdsSimple(8, 0, ibmOf(0), []uint32{0, 1, 2, 3}))
@@ -504,24 +505,46 @@ func TestRegisterTable2(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Parse: %v", err)
 	}
-	if got := m.Product().ParameterName; got != "" {
-		t.Errorf("未注册的表不该给出名字，得到 %q", got)
+	if got := m.Product().ParameterName; got != "2 metre temperature" {
+		t.Errorf("内置 ECMWF 表 128 的 167 = %q，想要 \"2 metre temperature\"（ecCodes 2.50 parameterName）", got)
 	}
 
-	if err := RegisterTable2(98, 128, map[int]string{167: "2 metre temperature"}); err != nil {
+	// A caller registration replaces the built-in table for that pair.
+	if err := RegisterTable2(98, 128, map[int]string{167: "overridden"}); err != nil {
 		t.Fatalf("RegisterTable2: %v", err)
 	}
 	m2, _ := Parse(0, 0, msg)
-	if got := m2.Product().ParameterName; got != "2 metre temperature" {
-		t.Errorf("注册后参数名 = %q", got)
+	if got := m2.Product().ParameterName; got != "overridden" {
+		t.Errorf("注册后参数名 = %q，想要 overridden", got)
 	}
-	// A different table version stays unaffected (separate code space; never mixed).
+	// Restore the built-in rows (RegisterTable2 has no unregister) so the rest of
+	// the package's tests keep seeing the vendored table.
+	restore := make(map[int]string, len(genTable2[[2]uint8{98, 128}]))
+	for code, name := range genTable2[[2]uint8{98, 128}] {
+		restore[int(code)] = name
+	}
+	if err := RegisterTable2(98, 128, restore); err != nil {
+		t.Fatalf("还原 RegisterTable2: %v", err)
+	}
+
+	// A different table version keeps its own code space; it never borrows the
+	// other version's names — and now it has its own real ones.
 	other := buildMessage(t, pdsOpts{param: 167, tableVersion: 171, levelType: 100, level: 500, flags: pdsFlagGDS},
 		gdsLatLon(2, 2, 10, 20, 5, 25, 5, 5, 0), nil,
 		bdsSimple(8, 0, ibmOf(0), []uint32{0, 1, 2, 3}))
 	m3, _ := Parse(0, 0, other)
-	if got := m3.Product().ParameterName; got != "" {
-		t.Errorf("表版本 171 未注册，不该借用 128 的名字，得到 %q", got)
+	if got := m3.Product().ParameterName; got != "2 metre temperature anomaly" {
+		t.Errorf("表版本 171 的 167 = %q，想要 \"2 metre temperature anomaly\"（表 171 自己的名字，不借用表 128）", got)
+	}
+
+	// No such table and no registration: ecCodes' codetable_title degrades to the
+	// decimal code, and so do we.
+	unknown := buildMessage(t, pdsOpts{param: 167, tableVersion: 99, levelType: 100, level: 500, flags: pdsFlagGDS},
+		gdsLatLon(2, 2, 10, 20, 5, 25, 5, 5, 0), nil,
+		bdsSimple(8, 0, ibmOf(0), []uint32{0, 1, 2, 3}))
+	m4, _ := Parse(0, 0, unknown)
+	if got := m4.Product().ParameterName; got != "167" {
+		t.Errorf("没有这张表时 = %q，想要 \"167\"（ecCodes 退化到十进制码）", got)
 	}
 
 	if err := RegisterTable2(300, 1, map[int]string{1: "x"}); err == nil {

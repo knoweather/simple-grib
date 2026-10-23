@@ -125,10 +125,21 @@ type Product struct {
 	// level type codes from table 3, and the generating-process id is a
 	// centre-defined code; the GRIB2 counterparts come from tables 4.2 /
 	// 4.5 / 4.3. Equal numbers do not imply equal meaning.
-	Edition                 int
-	TemplateNumber          int
-	ParameterCategory       int // octet 10, table 4.1
-	ParameterNumber         int // octet 11, table 4.2 (resolved per the discipline)
+	Edition           int
+	TemplateNumber    int
+	ParameterCategory int // octet 10, table 4.1
+	ParameterNumber   int // octet 11, table 4.2 (resolved per the discipline)
+	// ParameterName is ecCodes' "parameterName": the title of the table 4.2 row
+	// for (discipline, category, number) **in the table version this message
+	// declares** (section 1 octets 10/11, plus the originating centre for the
+	// local tables) — not the newest WMO table. When the declared version has
+	// no such table, or the table has no such code, ecCodes renders the bare
+	// decimal code ("224", "13", "0"); ParameterName does the same, so it is
+	// never empty for a parsed GRIB2 parameter. See spec.ParameterNameFor and
+	// spec.ParameterName (the version-independent, always-newest variant).
+	//
+	// On GRIB1 it stays whatever grib1's table 2 registration produced (empty
+	// until RegisterTable2 registers that centre/version).
 	ParameterName           string
 	TypeOfGeneratingProcess int           // first TableRef=4.3 field (octet 12 in template 4.0)
 	ForecastTime            *ForecastTime // nil = the template has no time-unit field
@@ -206,9 +217,22 @@ func (m *Message) Product() (*Product, error) {
 	}
 	if i, ok := fieldAtOctet(def, 11, 4, 2); ok {
 		p.ParameterNumber = int(w.At(i).U)
-		if name, err := spec.ParameterName(m.Discipline(), p.ParameterCategory, p.ParameterNumber); err == nil {
-			p.ParameterName = name
+		// ecCodes' parameterName is the codetable_title of parameterNumber, and
+		// the codetable itself is versioned: the master directory is
+		// grib2/tables/<masterTablesVersionNumber> (section 1 octet 10), with
+		// grib2/tables/local/<centre mnemonic>/<localTablesVersion> merged in
+		// when octet 11 is neither 0 nor 255. spec.ParameterNameFor replicates
+		// that lookup, including ecCodes' fallback to the bare decimal code.
+		// Section 1 is mandatory in GRIB2; if it is absent or unparsable the
+		// versions are unknown, and version 0 selects no table directory
+		// either — the same numeric fallback ecCodes produces.
+		ref := spec.ParamNameRef{Discipline: m.Discipline(), Category: p.ParameterCategory, Number: p.ParameterNumber}
+		if id, err := m.Identification(); err == nil {
+			ref.MasterVersion = id.MasterTableVersion
+			ref.LocalVersion = id.LocalTableVersion
+			ref.Centre = id.Centre
 		}
+		p.ParameterName = spec.ParameterNameFor(ref)
 	}
 
 	// Generating process: the first TableRef 4.3 field.

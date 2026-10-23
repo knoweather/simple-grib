@@ -3,21 +3,47 @@ package grib1
 import (
 	"fmt"
 	"sort"
+	"strconv"
 	"sync"
 )
 
-// Why table 2 (parameter tables) is not built in:
+// GRIB1 table 2 (the parameter tables) used to be registration-only: the table
+// varies by centre and version, ecCodes' table files are multi-column lines whose
+// name and unit fields contain spaces, and a hand-transcribed name is worse than
+// no name.
 //
-// It varies by centre and table version (WMO specifies only the international
-// exchange version; centres add hundreds of local codes), and ecCodes' table files
-// are multi-column `code alias shortname name unit` lines whose name and unit
-// fields contain spaces, so the column boundary itself is ambiguous — mechanical
-// transcription would mangle the names, and a mangled name is worse than no name.
+// What changed: the tables are now vendored data. paramdata/grib1 holds ecCodes
+// 2.50.0's `2.<centre>.<table2Version>.table` files verbatim, and
+// grib1/table2_gen.go is generated from them by cmd/paramgen using exactly the
+// rule ecCodes' grib_load_codetable() uses (the title runs up to the last '(' of
+// the line, then right-trimmed). The transcription is mechanical and checkable,
+// and it was checked: every row of every reachable table was compared against
+// ecCodes 2.50's `parameterName` and agrees byte for byte.
 //
-// So this package only provides a registration entry point and never guesses.
-// Register a centre's table as soon as you have it; unregistered codes leave
-// Product.ParameterName empty and the caller sees the raw numeric code, which is
-// always correct. Same design stance as spec.RegisterLocalTable on the GRIB2 side.
+// Which table a message selects follows ecCodes grib1/section.1.def lines
+// 137-145:
+//
+//	if (table2Version >= 128) {
+//	  if (centre != 98 && subCentre == 98) centreForTable2 = subCentre;
+//	  else                                 centreForTable2 = centre;
+//	} else {
+//	  centreForTable2 = WMO;   // 0 — the international exchange table
+//	}
+//
+// so `table2Version < 128` ignores the centre part of the file name entirely
+// (paramdata carries 2.82.1.table and 2.233.1.table, but no message can select
+// them), and `table2Version >= 128` may switch to subCentre 98 so that ECMWF data
+// redistributed by another centre still reads the ECMWF table.
+//
+// When the selected table has no entry for the code, or the table file does not
+// exist at all, ecCodes' `codetable_title(indicatorOfParameter)` degrades to the
+// decimal code, and so does this package: Product.ParameterName is never empty for
+// GRIB1 now. Use Table2Versions to see which tables a caller registered itself.
+//
+// RegisterTable2 still wins over the built-in tables and is keyed by the message's
+// own centre (the documented octet 5 / octet 4 pair), so an explicit registration
+// for (centre, version) fully replaces the built-in table for that pair — a code
+// missing from it then falls back to the decimal code, not to the built-in table.
 //
 // Important: never apply the WMO standard table to centre-local table versions
 // (table2Version >= 128). The same number means different things in different
@@ -39,7 +65,8 @@ var (
 
 // RegisterTable2 registers (or replaces) one parameter table. centre and version
 // must match PDS octet 5 / octet 4; names is copied, so later changes to the
-// caller's map do not affect the registered table.
+// caller's map do not affect the registered table. A registered table replaces the
+// built-in one for that (centre, version) pair — see the file header.
 //
 // Errors: nil/empty names, or parameter codes out of the byte range (GRIB1 codes
 // are one byte).
@@ -66,8 +93,10 @@ func RegisterTable2(centre, version int, names map[int]string) error {
 	return nil
 }
 
-// Table2Versions lists the registered (centre, table version) pairs in ascending
-// numeric order — handy for diagnosing "why is this file's parameter unnamed".
+// Table2Versions lists the caller-registered (centre, table version) pairs in
+// ascending numeric order — handy for diagnosing which tables a process added on
+// top of the built-in ones. Built-in tables are not listed: they live in
+// table2_gen.go and follow ecCodes' selection rule (see the file header).
 func Table2Versions() [][2]int {
 	table2Mu.RLock()
 	defer table2Mu.RUnlock()
@@ -84,15 +113,45 @@ func Table2Versions() [][2]int {
 	return out
 }
 
-// parameterName looks up a parameter name by (centre, tableVersion). Missing table
-// or missing code both return "". It never falls back to a different table — see
-// the file header.
-func parameterName(centre, version, code int) string {
-	table2Mu.RLock()
-	defer table2Mu.RUnlock()
-	t, ok := table2[[2]int{centre, version}]
-	if !ok {
-		return ""
+// table2Centre resolves the centre part of the table 2 file name, i.e. ecCodes'
+// centreForTable2 (grib1/section.1.def lines 137-145). subCentre is PDS octet 26.
+func table2Centre(centre, subCentre, version int) int {
+	if version < 128 {
+		return 0 // WMO: the international exchange table 2.0.<version>.table
 	}
-	return t.Names[code]
+	if centre != 98 && subCentre == 98 {
+		return subCentre
+	}
+	return centre
+}
+
+// parameterName returns the title of code in the table-2 file the message selects —
+// the same value ecCodes reports as `parameterName`
+// (section.1.def:50 `meta parameterName codetable_title(indicatorOfParameter)`).
+//
+// Selection order: a table registered through RegisterTable2 for the message's own
+// (centre, version) wins outright; otherwise the built-in table for the pair
+// resolved by table2Centre; otherwise ecCodes' degradation to the decimal code,
+// which is also what a code missing from a selected table degrades to.
+func parameterName(centre, subCentre, version, code int) string {
+	key := [2]int{centre, version}
+	table2Mu.RLock()
+	t, ok := table2[key]
+	var registered string
+	if ok {
+		registered = t.Names[code]
+	}
+	table2Mu.RUnlock()
+	if ok {
+		if registered != "" {
+			return registered
+		}
+		return strconv.Itoa(code)
+	}
+	if m, hit := genTable2[[2]uint8{uint8(table2Centre(centre, subCentre, version)), uint8(version)}]; hit {
+		if name, hit := m[uint8(code)]; hit {
+			return name
+		}
+	}
+	return strconv.Itoa(code)
 }

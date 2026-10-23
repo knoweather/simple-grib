@@ -37,7 +37,7 @@ type Identification struct {
 // Product is the "what field, which level, which time range" part of section 1 (PDS).
 type Product struct {
 	Parameter          int    // octet 9, table 2 parameter indicator
-	ParameterName      string // needs the (centre, TableVersion) table 2; empty when unregistered, see RegisterTable2
+	ParameterName      string // title of Parameter in the selected table 2; never empty (ecCodes degrades to the decimal code), see table2.go
 	LevelType          int    // octet 10, table 3
 	LevelTypeName      string // table 3 name
 	LevelTop           int    // level value; the upper bound for layer-pair types
@@ -245,7 +245,7 @@ func parsePDS(sec Section) (*Identification, *Product, error) {
 		}
 	}
 
-	prod.ParameterName = parameterName(id.Centre, id.TableVersion, prod.Parameter)
+	prod.ParameterName = parameterName(id.Centre, id.SubCentre, id.TableVersion, prod.Parameter)
 	return id, prod, nil
 }
 

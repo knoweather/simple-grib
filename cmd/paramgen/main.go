@@ -14,9 +14,17 @@
 //     四个文件由 ecCodes 的同一脚本并行生成：条件序列完全一致，仅结果不同。
 //     生成器按 lockstep 解析（数量与条件序列逐一核对，不一致即报错），
 //     因此一份条件可以带四个结果。
-//     .lte33 变体只用于 masterTablesVersionNumber ≤ 33 的消息（MTG2 切换，
-//     阈值 33，见 grib2/section.1.def 的 tablesVersionMTG2Switch）；普通
-//     .def 用于 ≥ 34。生成器给条目打上 mtg2=0/1 条件，查询方提供该键。
+//     .lte33 变体用于 MTG2Switch == 0 的消息（pre-MTG2 编码），普通 .def 用于
+//     MTG2Switch != 0（post-MTG2，也是默认）。开关**不是**"masterTablesVersion
+//     ≤ 33"这么简单：阈值 tablesVersionMTG2Switch=33 只在
+//     MTG2SwitchViaTablesVersion 概念命中时才参与判断（顶层 subCentre=98、
+//     ecmf 中心目录、tigge/s2s/uerra/destine 等数据集目录命中；CERISE 的
+//     subCentre=98 + class=50 例外把它排除），不命中时 MTG2Switch=1；最后再由
+//     MTG2Switch 概念覆盖默认值（见 grib2/section.4.def 与 MTG2SwitchConcept.def）。
+//     生成器给条目打上 mtg2=0/1 条件，查询方（paramdb/mtg2.go）按这套规则算键。
+//   - grib2/MTG2SwitchViaTablesVersionConcept.def、grib2/MTG2SwitchConcept.def
+//     与 grib2/localConcepts/<centre>/ 下的同名文件：MTG2 开关概念，单独成两张
+//     表（genMTG2Via / genMTG2Switch），只用于 paramdb 派生 mtg2 键。
 //   - grib2/typeOfLevelConcept.def（typeOfLevel：面类型 → 名字）
 //   - grib2/localConcepts/<centre>/…（各中心本地概念，ecmf 优先）
 //   - grib1/{shortName,name,paramId,units}.def（WMO 表 2 版本 1-3）
@@ -25,7 +33,7 @@
 //
 // 输出（paramdb/）：concepts_gen.go —— 有序条目切片，层内 best-match（条件
 // 最多者胜，平手取后者）。查找顺序（模拟 ecCodes 的概念链，见
-// grib2/parameters.def）：master → 其它中心（字典序）→ ecmf → legacy（兜底）。
+// grib2/parameters.def）：本地/数据集（字典序）→ master → ecmf → legacy（兜底）。
 //
 // 与 specgen 一样「失败即报错」：解析不了、lockstep 破坏、值里出现分隔符，
 // 都带着文件+行号中止。
@@ -51,13 +59,23 @@ const missingToken = "\x00missing"
 
 // 概念链层级（ecCodes grib2/parameters.def 的概念链）：
 //
-//	tierPrimary: master + 消息中心本地概念（同层拼接，last-match 下 master
-//	             在后覆盖本地；本地补 master 没有的码段）
+//	tierPrimary: 消息中心本地概念/数据集在前、master 在后（同层拼接，顺序即
+//	             ecCodes 的 dir1(本地) → dir2(master)；本地补 master 没有的码段）
 //	tierEcmf:    shortNameECMF 兜底链（conceptsLocalDirECMF 硬编码 ecmf，
 //	             对非 ECMWF 消息也会查）
 //	tierLegacy:  最早的 legacy 概念（master 在前、ecmf 在后）
 //
 // 查询语义：tier 间"第一个有命中的层胜出"，层内"最后一个匹配的条目胜出"。
+//
+// tierPrimary 内「本地在前、master 在后」的依据：ecCodes 2.47 共享段的
+// preferLocalConceptsEnvVar 默认 "0"（不偏好本地），grib2/section.1.def 于是
+// conceptsDir1 = conceptsLocalDirAll（本地/数据集）、conceptsDir2 =
+// conceptsMasterDir（master）；合并后表序为 dir1 → dir2，而 Concept.cc 的
+// concept_evaluate 在条件数平手时取后者（`if (cnt >= match)`）——所以
+// **同层内条件数平手时 master 胜**（ECC-806）。本生成器必须按同一顺序追加：
+// 若 master 排在最前，平手时反而本地胜，与 ecCodes 相反。
+// 典型例：DWD ICON T_2M(centre=78 + 6 条件 = 7) 与 master 2t(mtg2=1 + 6 = 7)
+// 平手，ecCodes 2.44/2.47 都给 2t/"2 metre temperature"/K。
 const (
 	tierPrimary = 1
 	tierEcmf    = 2
@@ -105,10 +123,13 @@ func main() {
 
 	prov := readProvenance(filepath.Join(*dir, "PROVENANCE.txt"))
 
-	// 每个概念一条独立有序表；层级（master → 消息中心本地 → ecmf → legacy）
-	// 由追加顺序编码——先匹配先赢，平手取后者（last-match）。为了在平手时让更特
-	// 殊的条目胜出，必须在同级内按“条件最少 → 最多”的顺序追加：master 最先、
-	// 数据集（带额外生产状态/世代条件）居中、centre-local 和 ecmf 最后。
+	// 每个概念一条独立有序表；层级（本地/数据集 → master → ecmf → legacy）
+	// 由追加顺序编码——先匹配先赢，平手取后者（last-match）。层内顺序必须
+	// 与 ecCodes 的概念表顺序一致：preferLocalConcepts=0 时
+	// conceptsDir1=本地/数据集、conceptsDir2=master（见文件头"tierPrimary 内
+	// 本地在前、master 在后"的依据），故在同级内按「centre-local/数据集 →
+	// master」追加，让平手时 master 胜；ecmf 是独立兜底层，伪中心数据集挂在
+	// 主层末尾（见下），不在这个顺序里。
 	pool := newCondPool()
 	var snG2, nameG2, pidG2, unitG2 []outEntry
 
@@ -116,21 +137,22 @@ func main() {
 	// 这是 ecCodes 的 conceptsLocalDirAll="grib2/localConcepts/[centre:s]"。
 	centreOf := parseC1Table(filepath.Join(*dir, "common", "c-1.table"))
 
-	// 层级顺序（模拟 ecCodes 概念链，见 grib2/parameters.def）：
-	// 1) master（默认优先）
-	// 2) 消息中心自己的本地概念（conceptsLocalDirAll 按中心圈定）
+	// 层级顺序（模拟 ecCodes 概念链，见 grib2/parameters.def 与 section.1.def）：
+	// 1) 消息中心自己的本地概念（conceptsDir1 = conceptsLocalDirAll，按中心圈定）
+	// 2) master（conceptsDir2 = conceptsMasterDir）
 	// 3) ecmf 本地（shortNameECMF 兜底链）
-	// 4) legacy（最底层兜底）
+	// 4) legacy（最底层兜底，独立发射，见下）
 	// 数据集伪中心（tigge/s2s/uerra/destine …）通过 productionStatusOfProcessedData
-	// 激活，挂在主层末尾（centre-local 之后），平手时胜出——对齐 ecCodes 的
-	// datasetForLocal 重映射（数据集目录替换中心本地目录）。
+	// 激活，挂在主层末尾（centre-local/master 之后），平手时胜出——对齐 ecCodes 的
+	// datasetForLocal 重映射（数据集目录替换本地目录）。
 	centres := listCentres(filepath.Join(*dir, "grib2", "localConcepts"))
-	tiers := []tierSource{{centre: ""}} // master
+	var tiers []tierSource
 	for _, c := range centres {
 		if _, ok := centreOf[c]; ok && c != "ecmf" {
 			tiers = append(tiers, tierSource{centre: c})
 		}
 	}
+	tiers = append(tiers, tierSource{centre: ""})     // master = conceptsDir2，在本地之后
 	tiers = append(tiers, tierSource{centre: "ecmf"}) // 兜底链里的 ECMWF 本地
 
 	// 伪中心数据集目录定义（来自 section.4.def 的 concept datasetForLocal）。
@@ -166,9 +188,11 @@ func main() {
 		{dir: "nextgems", mcs: []int{53}, gen: -1},
 	}
 	pseudoHandled := map[string]bool{} // 已处理（含 vendored 子集里为空的）目录
-	// 伪中心条目先缓冲，待 tiers 循环（master + centre-local + ecmf）追加完后再
-	// 拼进主层——这样它们在同层内排在 centre-local 之后，平手时胜出，对齐
-	// ecCodes 的 datasetForLocal 重映射（数据集目录替换中心本地目录）。
+	// 伪中心条目先缓冲，待 tiers 循环（centre-local → master → ecmf）追加完后再
+	// 拼进主层——这样它们在同层内排在 centre-local 与 master 之后，平手时胜出。
+	// （ecCodes 的 datasetForLocal 是把数据集目录**替换**本地目录，即落在 dir1、
+	// 排在 master 之前；这里保持历史行为不动：伪中心条目激活条件更特异，
+	// 条件数恒多于普通 centre-local/master 条目，平手不可能，故位置不影响结果。）
 	var pSnG2, pNameG2, pPidG2, pUnitG2 []outEntry
 
 	// 为每条激活条件生成一组概念条目，先缓冲。
@@ -284,8 +308,8 @@ func main() {
 		}
 		// MTG2 的 .lte33/普通文件之分只存在于 master（以及部分中心目录）。
 		// ecCodes 对没有 .lte33 变体的中心（edzw、eswi、cnmc、ekmi、efkl…）
-		// 在所有表版本下都用同一个文件，所以这些普通条目不能带 mtg2 条件，
-		// 否则 tablesVersion ≤ 33 的真实消息（如 DWD ICON）会整层落空。
+		// 在两种开关下都用同一个文件，所以这些普通条目不能带 mtg2 条件
+		// （带了就会在某一档开关下整层落空）。
 		mtg2Plain := "mtg2=1"
 		if t.centre != "" {
 			if _, err := os.Stat(filepath.Join(base, "shortName.lte33.def")); err != nil {
@@ -318,11 +342,93 @@ func main() {
 		}
 	}
 
-	// 把缓冲的伪中心条目拼到主层末尾（见上：平手时胜过 centre-local）。
+	// 把缓冲的伪中心条目拼到主层末尾（见上：centre-local/master 之后，
+	// 条件数恒多于二者，平手不可能，故不影响 tierPrimary 的 ecCodes dir1→dir2 语义）。
 	snG2 = append(snG2, pSnG2...)
 	nameG2 = append(nameG2, pNameG2...)
 	pidG2 = append(pidG2, pPidG2...)
 	unitG2 = append(unitG2, pUnitG2...)
+
+	// ---- MTG2 开关概念：MTG2SwitchViaTablesVersion 与 MTG2Switch ----
+	//
+	// 这两个概念不是参数名，而是**参数概念表的开关**：ecCodes 用
+	// `meta shortNameFilename g2_param_concept_filename("shortName", MTG2Switch,
+	// tablesVersionMTG2Switch)`（grib2/parameters.def）选文件，规则是
+	//     MTG2Switch == 0 → <concept>.lte33.def（pre-MTG2 编码）
+	//     否则           → <concept>.def（post-MTG2；1 = 普通，2 = 普通 + chemId 拆分）
+	// 阈值 tablesVersionMTG2Switch = 33 见 grib2/section.1.def。
+	// 取值规则见 grib2/section.4.def 的注释与 mtg2_switch_default：
+	//     MTG2SwitchViaTablesVersion 概念命中 1 → 走 tablesVersion 规则
+	//         tablesVersion <= 33 → 0；> 33 且 class=mc/cr → 2；否则 1
+	//     不命中（默认 false）→ 1（status quo，post-MTG2）
+	// 再由 MTG2Switch 概念（中心/数据集目录 + 顶层）覆盖默认值。
+	// 目录文件里的 `1 = {true=1;}` 表示"目录生效即命中"；`true=1` 是恒真条件，
+	// 这里按等价的无条件条目发射。paramdb 侧的实现见 paramdb/mtg2.go。
+	var mtg2Via, mtg2Sw []outEntry
+	{
+		// true=1 恒真 → 去掉该条件（本库概念引擎不支持它，留着会永不命中）。
+		dropTrue := func(list []defEntry) []defEntry {
+			for i := range list {
+				kept := list[i].conds[:0]
+				for _, c := range list[i].conds {
+					if c.key == "true" && c.val == "1" {
+						continue
+					}
+					kept = append(kept, c)
+				}
+				list[i].conds = kept
+			}
+			return list
+		}
+		// 顶层（ecCodes 的 conceptsDir1）。
+		mtg2Via = append(mtg2Via, pool.emit(dropTrue(mustParseOptional(
+			filepath.Join(*dir, "grib2", "MTG2SwitchViaTablesVersionConcept.def"))), 0, "", "")...)
+		mtg2Sw = append(mtg2Sw, pool.emit(dropTrue(mustParseOptional(
+			filepath.Join(*dir, "grib2", "MTG2SwitchConcept.def"))), 0, "", "")...)
+		// 中心目录（按 CCT-1 的每个中心号各一套，与本地概念同规则）。助记符要
+		// 排序遍历，否则 map 顺序会让生成物不可复现。
+		mnems := make([]string, 0, len(centreOf))
+		for mnem := range centreOf {
+			mnems = append(mnems, mnem)
+		}
+		sort.Strings(mnems)
+		for _, mnem := range mnems {
+			base := filepath.Join(*dir, "grib2", "localConcepts", mnem)
+			via := dropTrue(mustParseOptional(filepath.Join(base, "MTG2SwitchViaTablesVersionConcept.def")))
+			sw := dropTrue(mustParseOptional(filepath.Join(base, "MTG2SwitchConcept.def")))
+			if len(via) == 0 && len(sw) == 0 {
+				continue
+			}
+			for _, code := range centreOf[mnem] {
+				centreCond := "centre=" + strconv.Itoa(code)
+				mtg2Via = append(mtg2Via, pool.emit(via, 0, "", centreCond)...)
+				mtg2Sw = append(mtg2Sw, pool.emit(sw, 0, "", centreCond)...)
+			}
+		}
+		// 伪中心数据集目录：门控条件与 section.4.def 的 datasetForLocal 同一套。
+		for _, pd := range pseudoDatasets {
+			base := filepath.Join(*dir, "grib2", "localConcepts", pd.dir)
+			via := dropTrue(mustParseOptional(filepath.Join(base, "MTG2SwitchViaTablesVersionConcept.def")))
+			sw := dropTrue(mustParseOptional(filepath.Join(base, "MTG2SwitchConcept.def")))
+			if len(via) == 0 && len(sw) == 0 {
+				continue
+			}
+			var gates []string
+			for _, st := range pd.sts {
+				gates = append(gates, fmt.Sprintf("productionStatusOfProcessedData=%d", st))
+			}
+			for _, mc := range pd.mcs {
+				gates = append(gates, fmt.Sprintf("marsClass=%d", mc))
+			}
+			for _, gate := range gates {
+				if pd.gen >= 0 {
+					gate = fmt.Sprintf("generation=%d;%s", pd.gen, gate)
+				}
+				mtg2Via = append(mtg2Via, pool.emit(via, 0, "", gate)...)
+				mtg2Sw = append(mtg2Sw, pool.emit(sw, 0, "", gate)...)
+			}
+		}
+	}
 
 	var snG1, nameG1, pidG1, unitG1 []outEntry
 	{
@@ -380,6 +486,10 @@ func main() {
 		unitG1 = append(unitG1, outEntry{tier: tierG1Table, conds: pool.intern(e.conds), result: e.unit})
 	}
 
+	// GRIB1 表 2 的题名（ecCodes 的 parameterName）——独立产物 grib1/table2_gen.go。
+	// 与上面的概念层不同，这里必须按 ecCodes 的选表规则归类（section.1.def:137-145）。
+	g1t2, g1t2Rows := grib1Table2Titles(filepath.Join(*dir, "grib1"))
+
 	tolG2 := pool.single(filepath.Join(*dir, "grib2", "typeOfLevelConcept.def"), tierPrimary)
 	tolG1 := pool.single(filepath.Join(*dir, "grib1", "typeOfLevel.def"), tierPrimary)
 
@@ -410,9 +520,10 @@ func main() {
 	// libRoot 是从 -out 推出的仓库根（默认 -out paramdb → "."）。
 	libRoot := filepath.Dir(*out)
 	outputs := []struct{ dir, name, src string }{
-		{*out, "concepts_gen.go", render(prov, pool, snG2, nameG2, pidG2, unitG2, snG1, nameG1, pidG1, unitG1, tolG2, tolG1)},
+		{*out, "concepts_gen.go", render(prov, pool, snG2, nameG2, pidG2, unitG2, snG1, nameG1, pidG1, unitG1, tolG2, tolG1, mtg2Via, mtg2Sw)},
 		{*out, "mars_gen.go", renderMars(prov, marsClass, marsType, marsStream)},
 		{filepath.Join(libRoot, "grib1"), "mars_gen.go", renderMarsGateGRIB1(prov, g1Mars)},
+		{filepath.Join(libRoot, "grib1"), "table2_gen.go", renderGrib1Table2(prov, g1t2)},
 		{libRoot, "mars_gen.go", renderMarsGateGRIB2(prov, g2Mars)},
 	}
 	for i := range outputs {
@@ -433,7 +544,7 @@ func main() {
 				fatal("check: %s is out of date with %s/ (run: go run ./cmd/paramgen)", target, *dir)
 			}
 		}
-		fmt.Println("paramgen -check: concepts_gen.go, paramdb/mars_gen.go, grib1/mars_gen.go and mars_gen.go in sync")
+		fmt.Println("paramgen -check: concepts_gen.go, paramdb/mars_gen.go, grib1/mars_gen.go, grib1/table2_gen.go and mars_gen.go in sync")
 		return
 	}
 	for _, o := range outputs {
@@ -441,10 +552,11 @@ func main() {
 			fatal("%v", err)
 		}
 	}
-	fmt.Printf("paramgen: wrote %s/{concepts_gen.go,mars_gen.go} (grib2 shortName %d / name %d / paramId %d / units %d, grib1 %d/%d/%d/%d, tol %d/%d entries, mars %d/%d/%d)\n",
+	fmt.Printf("paramgen: wrote %s/{concepts_gen.go,mars_gen.go} (grib2 shortName %d / name %d / paramId %d / units %d, grib1 %d/%d/%d/%d, tol %d/%d entries, mtg2 %d/%d, mars %d/%d/%d, grib1 table2 %d tables/%d names)\n",
 		*out, len(snG2), len(nameG2), len(pidG2), len(unitG2),
 		len(snG1), len(nameG1), len(pidG1), len(unitG1), len(tolG2), len(tolG1),
-		len(marsClass), len(marsType), len(marsStream))
+		len(mtg2Via), len(mtg2Sw),
+		len(marsClass), len(marsType), len(marsStream), len(g1t2), g1t2Rows)
 }
 
 func fatal(format string, a ...any) {
@@ -514,6 +626,14 @@ func parseDefFile(path string) ([]defEntry, error) {
 		} else if strings.HasPrefix(text, "}") {
 			closeCur()
 			continue
+		} else if tok, tail, ok := numericEntryHeader(text); ok {
+			// 无引号的数字 token：MTG2 开关概念（1 = {true=1;} / 0 = {...}）。
+			if cur != nil {
+				return nil, fmt.Errorf("%s line %d: entry started before previous closed", path, line)
+			}
+			out = append(out, defEntry{token: tok})
+			cur = &out[len(out)-1]
+			rest = tail
 		}
 		if cur == nil {
 			continue // 概念文件头部的杂项（如 "concept X (...)" 声明行）
@@ -608,6 +728,32 @@ func normalizeValue(v string) string {
 		return strconv.Itoa(n)
 	}
 	return v
+}
+
+// numericEntryHeader 识别无引号的数字 token 条目头：`0 = { ... }` / `1 = {...}`。
+// 返回 token（数字文本）与 '{' 之后的剩余部分。其它行（`concept X (...)`、
+// `if (...)`、`}` 等）返回 ok=false，由调用方忽略。
+func numericEntryHeader(text string) (token, rest string, ok bool) {
+	i := 0
+	if i < len(text) && (text[i] == '+' || text[i] == '-') {
+		i++
+	}
+	start := i
+	for i < len(text) && text[i] >= '0' && text[i] <= '9' {
+		i++
+	}
+	if i == start {
+		return "", "", false
+	}
+	tail := strings.TrimSpace(text[i:])
+	if !strings.HasPrefix(tail, "=") {
+		return "", "", false
+	}
+	tail = strings.TrimSpace(tail[1:])
+	if !strings.HasPrefix(tail, "{") {
+		return "", "", false
+	}
+	return text[:i], tail[1:], true
 }
 
 // condPool 把条件串去重 intern 成 genConds 池：四个并行概念文件的条件
@@ -717,16 +863,22 @@ type grib1TableEntry struct {
 	conds, sn, name, unit string
 }
 
-// parseGrib1CentreTables 解析 grib1/2.<centre>.<version>.table：每行
-// "code shortname name (unit)"，最后一个小括号组是单位。产出带
-// centre/table2Version/indicatorOfParameter 条目的条目。
-func parseGrib1CentreTables(dir string) []grib1TableEntry {
+// grib1TableFile 描述一张 grib1/2.<centre>.<version>.table。
+type grib1TableFile struct {
+	path    string
+	base    string
+	centre  int
+	version int
+}
+
+// grib1TableFiles 列出 paramdata/grib1 下全部 "2.<centre>.<version>.table"。
+func grib1TableFiles(dir string) []grib1TableFile {
 	files, err := filepath.Glob(filepath.Join(dir, "2.*.*.table"))
 	if err != nil {
 		fatal("%v", err)
 	}
 	sort.Strings(files)
-	var out []grib1TableEntry
+	var out []grib1TableFile
 	for _, f := range files {
 		base := filepath.Base(f) // "2.98.128.table"
 		parts := strings.Split(strings.TrimSuffix(base, ".table"), ".")
@@ -738,46 +890,171 @@ func parseGrib1CentreTables(dir string) []grib1TableEntry {
 		if err1 != nil || err2 != nil {
 			continue
 		}
-		prefix := fmt.Sprintf("centre=%d;table2Version=%d;", centre, version)
-		fh, err := os.Open(f)
-		if err != nil {
-			fatal("%v", err)
-		}
-		sc := bufio.NewScanner(fh)
-		line := 0
-		for sc.Scan() {
-			line++
-			text := strings.TrimSpace(strings.TrimSuffix(sc.Text(), "\r"))
-			if text == "" || strings.HasPrefix(text, "#") {
-				continue
-			}
-			fields := strings.SplitN(text, " ", 3)
-			if len(fields) < 3 {
-				fmt.Fprintf(os.Stderr, "paramgen: note: %s line %d: skipped %q\n", base, line, text)
-				continue
-			}
-			code, err := strconv.Atoi(fields[0])
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "paramgen: note: %s line %d: non-numeric code %q skipped\n", base, line, fields[0])
-				continue
-			}
-			rest := fields[2]
-			// "name (unit)"：最后一个小括号组是单位；没有括号组就没有单位。
-			name, unit := rest, ""
-			if i := strings.LastIndex(rest, "("); i >= 0 && strings.HasSuffix(rest, ")") {
-				name = strings.TrimSpace(rest[:i])
-				unit = rest[i+1 : len(rest)-1]
-			}
-			out = append(out, grib1TableEntry{
-				conds: prefix + "indicatorOfParameter=" + strconv.Itoa(code),
-				sn:    fields[1],
-				name:  name,
-				unit:  unit,
-			})
-		}
-		fh.Close()
+		out = append(out, grib1TableFile{path: f, base: base, centre: centre, version: version})
 	}
 	return out
+}
+
+// grib1TableRow 是 GRIB1 表 2 的一行。
+type grib1TableRow struct {
+	code int
+	sn   string
+	name string
+	unit string
+}
+
+// readGrib1Table2Rows 解析一张 "code shortname name (unit)" 表。题名取整行最后
+// 一个 '(' 之前的文本（ecCodes 的 grib_load_codetable()/CodetableTitle 用这条规则，
+// cmd/specgen/paramname.go 对 GRIB2 的 4.2 表也用它）。
+func readGrib1Table2Rows(f grib1TableFile) ([]grib1TableRow, error) {
+	fh, err := os.Open(f.path)
+	if err != nil {
+		return nil, err
+	}
+	defer fh.Close()
+	var out []grib1TableRow
+	sc := bufio.NewScanner(fh)
+	line := 0
+	for sc.Scan() {
+		line++
+		text := strings.TrimSpace(strings.TrimSuffix(sc.Text(), "\r"))
+		if text == "" || strings.HasPrefix(text, "#") {
+			continue
+		}
+		fields := strings.SplitN(text, " ", 3)
+		if len(fields) < 3 {
+			fmt.Fprintf(os.Stderr, "paramgen: note: %s line %d: skipped %q\n", f.base, line, text)
+			continue
+		}
+		code, err := strconv.Atoi(fields[0])
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "paramgen: note: %s line %d: non-numeric code %q skipped\n", f.base, line, fields[0])
+			continue
+		}
+		rest := fields[2]
+		// "name (unit)"：最后一个小括号组是单位；没有括号组就没有单位。
+		name, unit := rest, ""
+		if i := strings.LastIndex(rest, "("); i >= 0 && strings.HasSuffix(rest, ")") {
+			name = strings.TrimSpace(rest[:i])
+			unit = rest[i+1 : len(rest)-1]
+		}
+		out = append(out, grib1TableRow{code: code, sn: fields[1], name: name, unit: unit})
+	}
+	if err := sc.Err(); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// parseGrib1Table2Rows 读出整张表，读失败即报错（生成器的纪律：不猜表内容）。
+func parseGrib1Table2Rows(f grib1TableFile) []grib1TableRow {
+	rows, err := readGrib1Table2Rows(f)
+	if err != nil {
+		fatal("%v", err)
+	}
+	return rows
+}
+
+// parseGrib1CentreTables 把每张表 2 展开成带 centre/table2Version/
+// indicatorOfParameter 条件的条目（GRIB1 概念链的最后兜底层）。
+func parseGrib1CentreTables(dir string) []grib1TableEntry {
+	var out []grib1TableEntry
+	for _, f := range grib1TableFiles(dir) {
+		prefix := fmt.Sprintf("centre=%d;table2Version=%d;", f.centre, f.version)
+		for _, r := range parseGrib1Table2Rows(f) {
+			out = append(out, grib1TableEntry{
+				conds: prefix + "indicatorOfParameter=" + strconv.Itoa(r.code),
+				sn:    r.sn,
+				name:  r.name,
+				unit:  r.unit,
+			})
+		}
+	}
+	return out
+}
+
+// grib1Table2Titles 汇总内置 GRIB1 表 2 的题名（ecCodes 的 parameterName），按
+// ecCodes 能真正选中的 (centre, table2Version) 归类：
+//
+//   - table2Version < 128：centre 段恒为 WMO(0)，表名里的 centre 被忽略，所以
+//     paramdata 里的 2.82.1.table/2.233.1.table 永远选不中（记一条 note 后跳过）；
+//   - table2Version >= 128：键里的 centre 就是消息的 centre；centre != 98 &&
+//     subCentre == 98 的特例在运行时处理（见 grib1/table2.go 的 table2Centre）。
+//
+// 返回（表, 行数）。
+func grib1Table2Titles(dir string) (map[[2]int]map[int]string, int) {
+	out := map[[2]int]map[int]string{}
+	rows := 0
+	for _, f := range grib1TableFiles(dir) {
+		if f.centre != 0 && f.version < 128 {
+			fmt.Fprintf(os.Stderr, "paramgen: note: %s unreachable: table2Version %d < 128 selects WMO table 2.0.%d.table\n",
+				f.base, f.version, f.version)
+			continue
+		}
+		key := [2]int{f.centre, f.version}
+		tbl := out[key]
+		if tbl == nil {
+			tbl = map[int]string{}
+			out[key] = tbl
+		}
+		// 同一 code 重复出现时保留第一条，与 ecCodes 对已填槽位的处理一致
+		// （已被整表实测覆盖）。
+		for _, r := range parseGrib1Table2Rows(f) {
+			if _, dup := tbl[r.code]; dup {
+				continue
+			}
+			tbl[r.code] = r.name
+			rows++
+		}
+	}
+	return out, rows
+}
+
+// renderGrib1Table2 生成 grib1/table2_gen.go。
+func renderGrib1Table2(prov string, tables map[[2]int]map[int]string) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "// Code generated by cmd/paramgen from paramdata/ (%s).\n// DO NOT EDIT.\n\npackage grib1\n\n", prov)
+	b.WriteString(`// genTable2 是内置的 GRIB1 表 2：ecCodes 2.50.0 的
+// grib1/2.<centre>.<table2Version>.table 原样 vendored 在 paramdata/grib1 下，
+// 这里按 ecCodes 的 grib1/section.1.def:137-145 能真正选中的 (centre, version)
+// 归类 —— table2Version < 128 时 centre 段是 WMO(0)，所以 2.82.1.table 与
+// 2.233.1.table 不在表里（它们选不中）。
+//
+// 题名 = 行里第二个空白列之后、整行最后一个 '(' 之前的文本，与 ecCodes 的
+// grib_load_codetable() 一致；全部行都与 ecCodes 2.50 的 parameterName 逐字节
+// 核对过。表里没有的码、或整张表不存在时，parameterName 退化成十进制码字符串
+// （ecCodes 的 codetable_title 就是这么退化的）。选表与兜底见 grib1/table2.go。
+//
+// genTable2 is the built-in GRIB1 table 2 — the source of Product.ParameterName —
+// grouped by the (centre, table2Version) pairs ecCodes can actually select.
+var genTable2 = map[[2]uint8]map[uint8]string{
+`)
+	keys := make([][2]int, 0, len(tables))
+	for k := range tables {
+		keys = append(keys, k)
+	}
+	sort.Slice(keys, func(i, j int) bool {
+		if keys[i][0] != keys[j][0] {
+			return keys[i][0] < keys[j][0]
+		}
+		return keys[i][1] < keys[j][1]
+	})
+	for _, k := range keys {
+		tbl := tables[k]
+		codes := make([]int, 0, len(tbl))
+		for c := range tbl {
+			codes = append(codes, c)
+		}
+		sort.Ints(codes)
+		fmt.Fprintf(&b, "\t{%d, %d}: { // paramdata/grib1/2.%d.%d.table, %d names\n",
+			k[0], k[1], k[0], k[1], len(codes))
+		for _, c := range codes {
+			fmt.Fprintf(&b, "\t\t%d: %s,\n", c, strconv.Quote(tbl[c]))
+		}
+		b.WriteString("\t},\n")
+	}
+	b.WriteString("}\n")
+	return b.String()
 }
 
 // --------------------------------------------------------------- 输出
@@ -785,7 +1062,8 @@ func parseGrib1CentreTables(dir string) []grib1TableEntry {
 func render(prov string, pool *condPool,
 	snG2, nameG2, pidG2, unitG2 []outEntry,
 	snG1, nameG1, pidG1, unitG1 []outEntry,
-	tolG2, tolG1 []outEntry) string {
+	tolG2, tolG1 []outEntry,
+	mtg2Via, mtg2Sw []outEntry) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "// Code generated by cmd/paramgen from paramdata/ (%s).\n// DO NOT EDIT.\n\npackage paramdb\n\n", prov)
 	b.WriteString("// 每个概念是一条有序条目表（层级优先级已编码进追加顺序）：层内 best-match，\n")
@@ -814,6 +1092,12 @@ func render(prov string, pool *condPool,
 	writeList("genUnitsGrib1", unitG1)
 	writeList("genTypeOfLevelGrib2", tolG2)
 	writeList("genTypeOfLevelGrib1", tolG1)
+	// MTG2 开关概念（选 <concept>.lte33.def 还是 <concept>.def，见 paramdb/mtg2.go）。
+	b.WriteString("// MTG2 开关概念：MTG2SwitchViaTablesVersionConcept.def 与 MTG2SwitchConcept.def\n")
+	b.WriteString("// （顶层 + 各中心/伪中心数据集目录）的条目。取值 0 = pre-MTG2（用 .lte33\n")
+	b.WriteString("// 概念）、1/2 = post-MTG2（用普通概念）。\n")
+	writeList("genMTG2Via", mtg2Via)
+	writeList("genMTG2Switch", mtg2Sw)
 	return b.String()
 }
 

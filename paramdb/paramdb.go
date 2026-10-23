@@ -9,8 +9,8 @@
 // （同一参数号、不同层）的原因。
 //
 // 查找入口接受 Map（键值对，键名与 ecCodes 相同）；QueryFrom 从已解析的
-// grib.Message 构造它。没匹配上就返回 ok=false——与 ecCodes 的 unknown
-// 一样，本包绝不猜。
+// grib.Message 构造它。没匹配上返回 ok=false（本包绝不猜）；要逐字复刻
+// ecCodes 的键值（"unknown"/0）请用 ShortNameOrUnknown 一族，见 Unknown。
 //
 // 覆盖范围与 ecCodes 的差异（都有意为之，详见包内各处注释）：
 //   - 只实现了概念条件涉及的"核心键"；概率模板的 probabilityType 与上下限
@@ -44,6 +44,63 @@ import (
 // 概念条件里的 missing() 只与它匹配。QueryFrom 会用它填充缺失的
 // scaleFactorOfFirstFixedSurface 之类的键。
 const Missing = "\x00missing"
+
+// Unknown 是 ecCodes 在概念链完全没有命中时给出的字面量：shortName、name、
+// units 三个键都是 "unknown"，paramId 是 0（不是字符串）。ecCodes 2.47 与 2.50
+// 都是这个行为，例如把一条 GRIB2 消息的 parameterCategory/parameterNumber 改成
+// 表里都没有的值后：
+//
+//	codes_get(h, "shortName")  -> 'unknown'
+//	codes_get(h, "name")       -> 'unknown'
+//	codes_get(h, "units")      -> 'unknown'
+//	codes_get(h, "paramId")    -> 0
+//
+// 本包的 ShortName/Name/Units 保持 (值, ok) 形状：ok=false 才携带"没命中"这条
+// 信息，这是调用方判断"消息里到底有没有这个参数"的唯一依据，所以不把返回值改成
+// Unknown。要逐字复刻 ecCodes 的键值（例如 gribdump -json 的对照输出）请用
+// ShortNameOrUnknown / NameOrUnknown / UnitsOrUnknown / ParamIDOrZero。
+const Unknown = "unknown"
+
+// ShortNameOrUnknown 是 ecCodes 的 shortName 键视图：没命中时给 Unknown。
+func ShortNameOrUnknown(q Map) string {
+	if v, ok := ShortName(q); ok {
+		return v
+	}
+	return Unknown
+}
+
+// NameOrUnknown 是 ecCodes 的 name 键视图：没命中时给 Unknown。
+func NameOrUnknown(q Map) string {
+	if v, ok := Name(q); ok {
+		return v
+	}
+	return Unknown
+}
+
+// UnitsOrUnknown 是 ecCodes 的 units 键视图：没命中时给 Unknown。
+func UnitsOrUnknown(q Map) string {
+	if v, ok := Units(q); ok {
+		return v
+	}
+	return Unknown
+}
+
+// ParamIDOrZero 是 ecCodes 的 paramId 键视图：没命中时给 0（ParamID 本身也返回
+// 0，这里只是把 ecCodes 的兜底写成显式契约）。
+func ParamIDOrZero(q Map) int {
+	v, _ := ParamID(q)
+	return v
+}
+
+// TypeOfLevelOrUnknown 是 ecCodes 的 typeOfLevel 键视图：没命中时给 Unknown。
+// 把 typeOfFirstFixedSurface 改成表里没有的 200 或 255 时，ecCodes 的
+// typeOfLevel 就是 'unknown'（2.47 与 2.50 相同）。
+func TypeOfLevelOrUnknown(q Map) string {
+	if v, ok := TypeOfLevel(q); ok {
+		return v
+	}
+	return Unknown
+}
 
 // Map 是一次查询的键值对：键名与 ecCodes 相同（discipline、
 // parameterCategory、typeOfFirstFixedSurface、…），值统一为字符串

@@ -179,7 +179,8 @@ type msgOutput struct {
 	// end-of-overall-interval，或 GRIB1 的 P2）。瞬时产品两者相等。
 	Step *stepOut `json:"step,omitempty"`
 	// ParamDB 是 paramdb 概念查询的结果（ecCodes shortName/name/paramId/
-	// units/typeOfLevel 的等价物）；查不到的键省略。
+	// units/typeOfLevel 的等价物）。取值与 ecCodes 逐字一致：没命中时是
+	// "unknown"/0，不是省略。
 	ParamDB *pdbOut      `json:"paramdb,omitempty"`
 	DataRep *drOut       `json:"dataRep,omitempty"`
 	Values  []float32Val `json:"values,omitempty"`
@@ -196,13 +197,15 @@ type code struct {
 	Name string `json:"name,omitempty"`
 }
 
-// pdbOut 是 paramdb 概念查询的输出视图。
+// pdbOut 是 paramdb 概念查询的输出视图，取值刻意与 ecCodes 的键逐字一致：
+// 概念链没命中时 ecCodes 给 shortName/name/units/typeOfLevel = "unknown"、
+// paramId = 0（见 paramdb.Unknown），所以这里不省略任何字段。
 type pdbOut struct {
-	ShortName   string `json:"shortName,omitempty"`
-	Name        string `json:"name,omitempty"`
-	ParamID     int    `json:"paramId,omitempty"`
-	Units       string `json:"units,omitempty"`
-	TypeOfLevel string `json:"typeOfLevel,omitempty"`
+	ShortName   string `json:"shortName"`
+	Name        string `json:"name"`
+	ParamID     int    `json:"paramId"`
+	Units       string `json:"units"`
+	TypeOfLevel string `json:"typeOfLevel"`
 }
 
 // stepOut 是 Message.StepRange 的输出视图。
@@ -236,13 +239,21 @@ type gridOut struct {
 }
 
 type prodOut struct {
-	Template     code   `json:"template"`
-	Parameter    code   `json:"parameter"`
-	Unit         string `json:"unit,omitempty"` // WMO table 4.2 unit; "" = not declared
-	Category     int    `json:"category"`
-	Number       int    `json:"number"`
-	GenProcess   code   `json:"typeOfGeneratingProcess"`
-	ForecastTime *fcOut `json:"forecastTime,omitempty"`
+	Template code `json:"template"`
+	// Parameter is the WMO table 4.2 entry looked up in the *newest* vendored
+	// tables (spec.ParameterName): Code is -1 when that lookup misses.
+	Parameter code   `json:"parameter"`
+	Unit      string `json:"unit,omitempty"` // WMO table 4.2 unit; "" = not declared
+	Category  int    `json:"category"`
+	Number    int    `json:"number"`
+	// ParameterName is ecCodes' "parameterName": the table 4.2 title from the
+	// table version this message declares (Product.ParameterName /
+	// spec.ParameterNameFor), falling back to the decimal code exactly like
+	// ecCodes. It is the field to diff against `codes_get(gid,"parameterName")`;
+	// Parameter above keeps the version-independent, always-newest view.
+	ParameterName string `json:"parameterName"`
+	GenProcess    code   `json:"typeOfGeneratingProcess"`
+	ForecastTime  *fcOut `json:"forecastTime,omitempty"`
 	// EndOfInterval is the statistical templates' "time of end of overall
 	// time interval" (GRIB2 4.8-4.14) — the interval *end*, while
 	// ForecastTime is its start.
@@ -388,10 +399,11 @@ func messageOutput(m *grib.Message, path string, i, nValues int, sections []int)
 		g1, _ := m.GRIB1()
 		gp := g1.Product()
 		po := prodOut{
-			Template:   code{Code: -1, Name: "not applicable in GRIB1"},
-			Parameter:  code{Code: gp.Parameter, Name: gp.ParameterName},
-			Number:     gp.Parameter,
-			GenProcess: code{Code: g1.Identification().GeneratingProcess, Name: "GRIB1 generatingProcessIdentifier (centre-defined)"},
+			Template:      code{Code: -1, Name: "not applicable in GRIB1"},
+			Parameter:     code{Code: gp.Parameter, Name: gp.ParameterName},
+			ParameterName: gp.ParameterName,
+			Number:        gp.Parameter,
+			GenProcess:    code{Code: g1.Identification().GeneratingProcess, Name: "GRIB1 generatingProcessIdentifier (centre-defined)"},
 		}
 		if d, ok := gp.ForecastTime(); ok {
 			po.ForecastTime = &fcOut{
@@ -423,13 +435,14 @@ func messageOutput(m *grib.Message, path string, i, nValues int, sections []int)
 		}
 		unit, _ := spec.ParameterUnit(m.Discipline(), p.ParameterCategory, p.ParameterNumber)
 		po := prodOut{
-			Template:   tmpl,
-			Parameter:  param,
-			Unit:       unit,
-			Category:   p.ParameterCategory,
-			Number:     p.ParameterNumber,
-			GenProcess: tableCode(4, 3, p.TypeOfGeneratingProcess),
-			NV:         p.NV,
+			Template:      tmpl,
+			Parameter:     param,
+			ParameterName: p.ParameterName,
+			Unit:          unit,
+			Category:      p.ParameterCategory,
+			Number:        p.ParameterNumber,
+			GenProcess:    tableCode(4, 3, p.TypeOfGeneratingProcess),
+			NV:            p.NV,
 		}
 		if p.ForecastTime != nil {
 			po.ForecastTime = &fcOut{Unit: tableCode(4, 4, p.ForecastTime.Unit), Value: p.ForecastTime.Value.String()}
@@ -446,17 +459,19 @@ func messageOutput(m *grib.Message, path string, i, nValues int, sections []int)
 		mo.Product = &po
 	}
 
-	// paramdb 概念查询（ecCodes shortName/name/paramId/units/typeOfLevel）
+	// paramdb 概念查询（ecCodes shortName/name/paramId/units/typeOfLevel）。
+	// 这里刻意用 ecCodes 的键值视图：概念链没命中时 ecCodes 给
+	// shortName/name/units = "unknown"、paramId = 0，而不是空串/缺键——本工具
+	// 的输出就是拿来跟 ecCodes 对照的，所以要逐字一致（见 paramdb.Unknown）。
 	if q, qerr := paramdb.QueryFrom(m); qerr == nil {
-		pdb := &pdbOut{}
-		pdb.ShortName, _ = paramdb.ShortName(q)
-		pdb.Name, _ = paramdb.Name(q)
-		pdb.ParamID, _ = paramdb.ParamID(q)
-		pdb.Units, _ = paramdb.Units(q)
-		pdb.TypeOfLevel, _ = paramdb.TypeOfLevel(q)
-		if pdb.ShortName != "" || pdb.Name != "" || pdb.ParamID != 0 || pdb.Units != "" || pdb.TypeOfLevel != "" {
-			mo.ParamDB = pdb
+		pdb := &pdbOut{
+			ShortName:   paramdb.ShortNameOrUnknown(q),
+			Name:        paramdb.NameOrUnknown(q),
+			ParamID:     paramdb.ParamIDOrZero(q),
+			Units:       paramdb.UnitsOrUnknown(q),
+			TypeOfLevel: paramdb.TypeOfLevelOrUnknown(q),
 		}
+		mo.ParamDB = pdb
 	}
 
 	// 预报区间（ecCodes 的 forecastTime/step/validityDate 语义）
@@ -757,6 +772,11 @@ func renderMessage(mo msgOutput) string {
 			w("  product: template %d %s, parameter %d.%d %s", p.Template.Code, orEmpty(p.Template.Name), p.Category, p.Number, orEmpty(p.Parameter.Name))
 		}
 		w(", generating process: %s, NV=%d\n", renderCode(p.GenProcess), p.NV)
+		if p.ParameterName != "" && p.ParameterName != p.Parameter.Name {
+			// ecCodes' parameterName (selected by the message's own table
+			// version) whenever it differs from the always-newest lookup above.
+			w("    parameterName: %s\n", p.ParameterName)
+		}
 		if p.ForecastTime != nil {
 			w("    forecast time: %s %s\n", p.ForecastTime.Value, renderCode(p.ForecastTime.Unit))
 		}

@@ -4,6 +4,8 @@ import (
 	"math"
 	"os"
 	"testing"
+
+	"github.com/knoweather/simple-grib/spec"
 )
 
 // ibmEncode32 encodes a float64 as GRIB1 IBM single precision (4 bytes, big
@@ -175,8 +177,26 @@ func TestMixedEditionFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("msg1 Product: %v", err)
 	}
-	if p1.Edition != 2 || p1.ParameterName != "Temperature" {
+	// msg1 的 fixture 是 188 字节的 ECMWF eccodes 样本，第 1 节声明
+	// masterTablesVersionNumber = 0 —— 没有 tables/0 目录。
+	//
+	// ecCodes 的 parameterName 于是退化成十进制码（CodetableTitle::
+	// unpack_string 在拿不到表条目时 snprintf("%d", value)）：
+	//
+	//   $ python -c "import eccodes; h=eccodes.codes_grib_new_from_file(open('testdata/ecc-xcheck/poscorners.grib2','rb')); print(eccodes.codes_get(h,'tablesVersion'), repr(eccodes.codes_get(h,'parameterName')))"
+	//   0 '0'
+	//
+	// 因此版本化的 Product.ParameterName（spec.ParameterNameFor）在这里是 "0"；
+	// 版本无关、恒用最新 WMO 表的 spec.ParameterName 仍然是 "Temperature"。
+	// 两者是_不同_的语义，各自在此钉住。
+	if p1.Edition != 2 || p1.ParameterName != "0" {
 		t.Errorf("msg1 product = %+v", p1)
+	}
+	if name, err := spec.ParameterName(0, 0, 0); err != nil || name != "Temperature" {
+		t.Errorf("spec.ParameterName(0,0,0) = %q, %v; 想要 Temperature（最新表视图，与版本化 API 语义不同）", name, err)
+	}
+	if name := spec.ParameterNameFor(spec.ParamNameRef{MasterVersion: 0, LocalVersion: 0, Centre: 98}); name != "0" {
+		t.Errorf("spec.ParameterNameFor(v0) = %q; 想要 \"0\"（ecCodes 在无表版本时退化到十进制码）", name)
 	}
 }
 

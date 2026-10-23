@@ -37,15 +37,15 @@ import (
 //
 // 暂不提供：mars 命名空间键（marsClass/marsType/marsStream）、卫星板键、
 // 参考期模板键、timing 键（lengthOfTimeRange/indicatorOfUnitForTimeRange）。
-// 经实证（tmp/probe_era_disambig.py）：ecCodes 对**不带 marsClass** 的消息
+// ecCodes 对不带 marsClass 的消息
 // 同样不加载 era/cerise/era6/nextgems 目录，故这些目录不接入本库与 ecCodes
 // 行为一致；marsClass 只存在于真实 ECMWF MARS 归档消息（grib2/local.98.def
 // 的 2 字节 codetable），需 ECMWF 专有样本方能验证。
 //
 // 键名注意：ecCodes 的概念条件写 localTablesVersion（见 grib2/section.1.def
 // 的 `codetable[1] localTablesVersion`），不是 localTablesVersionNumber。
-// 本库曾只提供后者，导致 ecmf（1200 处）与 era 家族的本地条目永不命中、
-// 一律回退 master；现已两个键都给。
+// 两个键都必须提供：只给后者会让 ecmf（1200 处）与 era 家族的本地条目永不命中，
+// 只剩 master 兜底。
 func QueryFrom(m *grib.Message) (Map, error) {
 	if m == nil {
 		return nil, errors.New("paramdb: QueryFrom with nil message")
@@ -71,6 +71,9 @@ func queryFromGRIB2(m *grib.Message) (Map, error) {
 		"parameterNumber":                 strconv.Itoa(p.ParameterNumber),
 		"productDefinitionTemplateNumber": strconv.Itoa(p.TemplateNumber),
 		"masterTablesVersionNumber":       strconv.Itoa(id.MasterTableVersion),
+		// ecCodes 的 section.1.def 里 `alias gribMasterTablesVersionNumber=tablesVersion;`，
+		// 两个键等价。MTG2 开关概念（MTG2SwitchConcept.def）的条件写 tablesVersion。
+		"tablesVersion": strconv.Itoa(id.MasterTableVersion),
 		// ecCodes 的概念条件用 localTablesVersion（见 grib2/section.1.def 的
 		// `codetable[1] localTablesVersion`）。本库曾只给 localTablesVersionNumber，
 		// 而概念文件用它 0 次——ecmf（1200 处）、era/cerise/era6/nextgems
@@ -85,13 +88,12 @@ func queryFromGRIB2(m *grib.Message) (Map, error) {
 	if hasGeneratingProcessField(p.TemplateNumber) {
 		q["typeOfGeneratingProcess"] = strconv.Itoa(p.TypeOfGeneratingProcess)
 	}
-	// MTG2 概念变体开关（ecCodes tablesVersionMTG2Switch = 33）：
-	// master 表版本 ≤ 33 用 .lte33 概念，≥ 34 用普通概念。
-	if id.MasterTableVersion <= 33 {
-		q["mtg2"] = "0"
-	} else {
-		q["mtg2"] = "1"
-	}
+	// MTG2 开关（ecCodes 的 MTG2Switch，见 mtg2.go）：只有
+	// MTG2SwitchViaTablesVersion 概念命中（如 subCentre=98、ECMWF 中心、数据集
+	// 目录）且 tablesVersion ≤ 33 时才用 .lte33 概念，否则一律用普通概念。
+	// 不能只看 tablesVersion：DWD ICON 这类 tv=19 但 subCentre=255 的报文，
+	// ecCodes 给的是 post-MTG2 的 max_2t / 237167。
+	q["mtg2"] = conceptMtg2Key(MTG2Switch(q))
 	addSurfaceKeys(q, "First", p.Level1)
 	addSurfaceKeys(q, "Second", p.Level2)
 	// 等压面：ecCodes 默认以 hPa 呈现（typeOfLevel = isobaricInhPa），

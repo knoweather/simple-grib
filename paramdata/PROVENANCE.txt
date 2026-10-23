@@ -14,9 +14,20 @@
 
 grib2/
   shortName.def / name.def / paramId.def / units.def
-      master 概念（masterTablesVersionNumber >= 34，MTG2 后编码）
+      master 概念（MTG2Switch != 0，post-MTG2 编码）
   *.lte33.def
-      masterTablesVersionNumber <= 33（MTG2 前）使用的变体
+      MTG2Switch == 0（MTG2 前）使用的变体。开关并不等价于
+      "masterTablesVersionNumber <= 33"：阈值 tablesVersionMTG2Switch = 33
+      只在 MTG2SwitchViaTablesVersion 概念命中时才参与判断（顶层
+      subCentre=98、ecmf 中心目录、tigge/s2s/uerra/destine 等数据集目录命中；
+      CERISE 的 subCentre=98 + class=50 例外把它排除），不命中时默认 1，
+      最后由 MTG2Switch 概念覆盖。派生实现见 paramdb/mtg2.go，取值见
+      paramdb/mtg2_test.go 的用例。
+  MTG2SwitchViaTablesVersionConcept.def / MTG2SwitchConcept.def
+      上面两个开关概念的顶层文件；localConcepts/<centre>/ 下有同名本地文件
+      （ecmf 的 via 文件 = `1 = {true=1;}`；cerise/era/era6/hydro_legacy/
+      destinegen1 的 MTG2SwitchConcept.def = `0 或 1 = {true=1;}`）。共 16 个
+      文件，只用于 paramdb 派生 mtg2 键（生成物 genMTG2Via / genMTG2Switch）。
   *.legacy.def
       更早编码的兜底条目
   typeOfLevelConcept.def
@@ -35,11 +46,22 @@ grib1/
       eswi、kwbc、lfpw、lowm、rjtd、sbsj 共 14 个中心）。提供 GRIB1
       中心参数的逐字 name 与 paramId（.table 文件没有 paramId 列）。
   2.<centre>.<version>.table
-      中心本地 GRIB1 参数表（code、shortname、"name (unit)"），
-      覆盖 ECMWF 128/173 等 47 张表。仅作为没有 localConcepts 文件的
-      中心的显示名兜底（name 等于 ecCodes 的 parameterName）。
-      2.<version>.table（无中心号，code table 2 旗标类文件）与
-      0.<centre>.table 不属于参数表，未包含。
+      中心本地 GRIB1 参数表（code、shortname、"name (unit)"），覆盖
+      ECMWF 128/173 等 47 张表。两个用途：
+        (a) 概念链最后一层的显示名兜底（没有 localConcepts 文件的中心）；
+        (b) 内置 Product.ParameterName —— cmd/paramgen 用它生成
+            grib1/table2_gen.go（ecCodes 的 parameterName 就是
+            codetable_title(indicatorOfParameter)）。
+      选表规则照 ecCodes grib1/section.1.def:137-145：table2Version < 128
+      时 centre 段恒为 WMO(0)（即 2.0.1/2/3.table），>= 128 时用消息的
+      centre（且 centre != 98 && subCentre == 98 时改用 subCentre）；
+      表里没有该码、或整张表不存在时退化成十进制码字符串。因此
+      2.82.1.table 与 2.233.1.table（centre != 0 且 version < 128）永远
+      选不中，paramgen 会跳过并记 note。题名 = 行里第二个空白列之后、整行
+      最后一个 '(' 之前的文本；45 张可达表共 5243 行全部与 ecCodes 2.50 的
+      parameterName 逐字节核对过（0 差异，见 grib1/table2_test.go）。
+      两段名的 2.<version>.table（如 2.128.table）与 2.table 不在
+      'grib1/2.[centre].[table2Version].table' 这条路径上，未包含。
   local*.def
       本地定义模板（local.<centre>.def、local.<centre>.<N>.def 等）。
       用途见下面「MARS 标签门控」。
@@ -59,6 +81,33 @@ common/
       CCT-1 中心表（中心号 ↔ 助记符）。paramgen 用它把
       localConcepts/<助记符>/ 目录映射到中心号，从而把本地概念条目
       按消息中心圈定（ecCodes 的 conceptsLocalDirAll="…/[centre:s]"）。
+  c-11.table
+      CCT-11 起始中心表（中心号 ↔ 助记符，303 行）。specgen 用它把
+      grib2/tables/local/<助记符>/<localTablesVersion>/ 目录映射到中心号：
+      ecCodes 的 section.1.def 用中心**助记符**（不是数字）拼本地表目录，
+      所以没有助记符的目录（local/era6，见下）在 ecCodes 里根本不可达。
+
+grib2/tables/（参数表 4.2 —— parameterName 的生成输入）
+  全目录共 2813 个 4.2*.table 文件，其中 specgen 只索引 1561 个：
+  <masterTablesVersionNumber>/4.2.<discipline>.<parameterCategory>.table
+      各 master 表版本（1-37）的表 4.2：目录下 2747 个 4.2*.table 文件，
+      1506 个是 ecCodes 唯一会去查的形状（template.4.parameter.def 的
+      tablename = '4.2.[discipline:l].[parameterCategory:l].table'），
+      1241 个是两段式命名（4.2.<n>.table，如 4.201.table），ecCodes 永远
+      查不到，原样保留以免与上游 diff 失真。
+  local/<助记符>/<localTablesVersion>/4.2.<d>.<c>.table
+      中心本地表（ecmf/1、edzw/1、egrr/1、kwbc/1、babj/1）：目录下共 66 个
+      4.2*.table 文件，62 个是上表形状（55 个可选 + era6 的 7 个不可达），
+      另 4 个是两段式命名（ecmf/1 三个、edzw/1 一个），不可选。
+      local/era6/ 的 7 个文件同样 vendored，但 era6 不在 c-11.table 里，
+      中心号也无法拼出该目录，ecCodes 不可达 —— 不参与生成。
+      本地表只在第 1 节 localTablesVersion ∉ {0,255} 时叠加，且 ecCodes 对
+      已填过的 code 直接跳过（Codetable.cc: grib_load_codetable），故主表胜。
+  用途：specgen 把 1561 个可达文件去重成一张池（400 张表 / 11632 行，
+  2.50.0 数据），生成 spec/paramname_gen.go，供 spec.ParameterNameFor 按报文
+  声明的表版本查 parameterName（= 表 4.2 行的标题文本），与 ecCodes 的
+  codetable_title(parameterNumber) 逐字节一致（见 spec/paramname_test.go 与
+  spec/paramname.go 的文档注释）。
 
 grib2/ 下的 MARS 门控文件
   local*.def
@@ -74,9 +123,21 @@ grib2/ 下的 MARS 门控文件
 3. 更新本文件的版本行与 commit；
 4. `go run ./cmd/paramgen -dir paramdata -out paramdb` 重新生成
    （会同时写出 paramdb/concepts_gen.go、paramdb/mars_gen.go、
-   grib1/mars_gen.go、mars_gen.go 四个文件）；
-5. `go test ./paramdb/`——已知映射锚点测试（2t/10u/tp/msl/t 等）必须仍绿；
-   若锚点变值，那是上游语义变化，需人工确认后更新锚点；
-6. `go test ./...`——GRIB1/GRIB2 的 MARS 标签门控测试（grib1/mars_test.go、
+   grib1/mars_gen.go、grib1/table2_gen.go、mars_gen.go 五个文件；
+   核对用 `go run ./cmd/paramgen -dir paramdata -out paramdb -check`）；
+5. `go run ./cmd/specgen -dir specdata -paramdata paramdata -out spec` 重新生成
+   spec/paramname_gen.go（表 4.2 标题池）。该文件与 grib2/tables/ 必须同源：
+   上游换了 tag 却只跑 paramgen，会留下与 definitions 不匹配的表 4.2 数据。
+   CI/本地核对用 `go run ./cmd/specgen -dir specdata -paramdata paramdata -out spec -check`
+   （spec/tables_gen.go、spec/paramname_gen.go、spec/doc.go 三者一起比对）；
+6. `go test ./paramdb/`——已知映射锚点测试（2t/10u/tp/msl/t 等）必须仍绿；
+   若锚点变值，那是上游语义变化，需人工确认后更新锚点。MTG2 开关另有
+   mtg2_test.go：中心/subCentre/表版本/数据集门控/覆盖概念的每个分支都
+   钉着 ecCodes 实测值（含 max_2t 与 mx2t 的翻转），必须仍绿；
+7. `go test ./grib1/`——GRIB1 表 2 的 oracle 锚点（grib1/table2_test.go：
+   选表分支、subCentre 特例、WMO 路由、十进制码兜底、内置表规模）必须仍绿；
+8. `go test ./spec/`——表 4.2 的 oracle 锚点（spec/paramname_test.go：版本选择、
+   本地表叠加、版本钳制、十进制码兜底）必须仍绿；
+9. `go test ./...`——GRIB1/GRIB2 的 MARS 标签门控测试（grib1/mars_test.go、
    mars_test.go）必须仍绿；若上游改了某个本地定义是否声明 mars_labeling，
    生成物会变，那是预期行为，但需确认不是 vendored 子集复制不全。
