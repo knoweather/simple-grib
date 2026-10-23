@@ -27,8 +27,12 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          go-version-file: go.mod
-          check-latest: true
+          # Pinned: grid_t30_baseline_test.go and grid_c38_e2e_test.go compare
+          # bit-exact float64 digests that were anchored on go1.27.1. A different
+          # patch release can change the last bits of math.Tan/math.Pow, so the
+          # toolchain has to match the anchors (go.mod also pins
+          # `toolchain go1.27.1`).
+          go-version: "1.27.1"
           cache: true
           cache-dependency-path: go.mod
       - name: Build
@@ -39,11 +43,11 @@ jobs:
         shell: bash
         run: |
           set -o pipefail
-          echo "go version: $(go version)"
+          echo "go version: $(go version)" > test-output.txt
           # Actions runs bash -e, which would abort on the failing go test before
           # the output could be turned into annotations.
           set +e
-          go test -count=1 ./... 2>&1 | tee test-output.txt
+          go test -count=1 ./... 2>&1 | tee -a test-output.txt
           rc=$?
           set -e
           if [ "$rc" -ne 0 ]; then
@@ -66,8 +70,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          go-version-file: go.mod
-          check-latest: true
+          go-version: "1.27.1"
           cache: true
           cache-dependency-path: go.mod
       - name: Build wasm
@@ -80,8 +83,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          go-version-file: go.mod
-          check-latest: true
+          go-version: "1.27.1"
           cache: true
           cache-dependency-path: go.mod
       - name: gofmt
