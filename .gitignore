@@ -43,3 +43,7 @@ _scratch_conceptcounts/
 /项目状态与约定.md
 /GRIB2-spec-核验报告.md
 /GRIB2-官方文档调研.md
+
+# Python bytecode caches (never commit compiled artefacts)
+__pycache__/
+*.pyc
