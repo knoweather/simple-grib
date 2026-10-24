@@ -87,9 +87,9 @@ like ecCodes' `codetable_title`; `grib1.RegisterTable2` still overrides it.
 | **GRIB1 decoding**: five-section parse + values (native float64) + coordinates; mixable with GRIB2 | ✅ |
 | Metadata: Identification / Product (with WMO code-table names), `Walk` generic template walker (one parser for all 254 templates) | ✅ |
 | Grid coordinates: 3.0/3.1/3.2/3.3 (+rotated), 3.40/3.41 Gaussian, **3.20 polar stereographic / 3.30 Lambert conformal point-by-point** | ✅ |
-| Data decoding: 5.0 simple (any bit width), 5.2 complex, 5.3 complex+spatial differencing, 5.4 IEEE binary32, **5.40 JPEG 2000 (pure-Go JPC decoder)**, 5.42 CCSDS AEC (own codec); 5.49152 carries a WebP image payload (local use, stored verbatim; header/decode via `simple-webp`) | ✅ |
+| Data decoding: 5.0 simple (any bit width), 5.2 complex, 5.3 complex+spatial differencing, 5.4 IEEE binary32, **5.40 JPEG 2000 (pure-Go JPC decoder)**, **5.41 PNG (grayscale 1/2/4/8/16-bit)**, 5.42 CCSDS AEC (own codec); 5.49152 carries a WebP image payload (local use, stored verbatim; header/decode via `simple-webp`) | ✅ |
 | Bitmap (section 6, indicator 0/255) + declared point count cross-check | ✅ |
-| Writers: `gribw` templates 5.0 / 5.4 with round-trip tests, plus 5.49152 WebP images via `SetWebP`; local table registration | ✅ |
+| Writers: `gribw` templates 5.0 / 5.4 with round-trip tests, plus 5.41 PNG payloads and 5.49152 WebP images via `SetDataSection`/`SetWebP`; local table registration | ✅ |
 | Writer `gribw1`: GRIB1 encoding (simple packing, grid types 0/4 + bitmap + constant fields) | ✅ |
 | CLI `gribdump`: metadata / values / field-by-field `Walk` / JSON / WebP image export | ✅ |
 | **WASM** `wasm/`: decode GRIB1 + GRIB2 directly in the browser / Node; metadata + values + coordinates as TypedArrays, drag-and-drop viewer included | ✅ |
@@ -347,11 +347,14 @@ L1 wire format File (io.ReaderAt + message index) → Message (whole-message buf
 
 ## Known limitations
 
-- Data templates 5.1 / 5.41 PNG / 5.5x spectral / 5.200 run-length →
+- Data templates 5.1 / 5.5x spectral / 5.200 run-length →
  `pack.ErrUnsupported` (fail-loud)
 - JPEG 2000 5.40: reversible 5/3 transform, LRCP order, one layer and one
  component only; irreversible 9/7, multi-layer / multi-component codestreams
  and COC/QCC/RGN/POC/PPM/PPT/SOP/EPH markers → `pack.ErrJPCUnsupported`
+- PNG 5.41: grayscale only, bit depth 1/2/4/8/16 and equal to
+ `bitsPerValue`; colour, transparent and palette PNGs → fail-loud. The writer
+ accepts a pre-encoded PNG through `SetDataSection` but does not encode pixels
 - Local-use template 49152 (WebP) is an opaque image payload: stored and
  returned byte-for-byte by `SetWebP`/`WebP`, and `Values` reports
  `pack.ErrNotNumeric`. Lossy and animated files are accepted (`WebPImage`
@@ -362,8 +365,9 @@ L1 wire format File (io.ReaderAt + message index) → Message (whole-message buf
 - Grids: remaining projection templates (3.10/3.12/3.31…) and stretched
  Gaussian (3.42/3.43) are metadata-only; `Point/Lats/Lons` →
  `grid.ErrNotImplemented`
-- Writers currently support 5.0 / 5.4(precision=1) (GRIB2), the local-use
- 5.49152 WebP image payload (`SetWebP`), and **`gribw1`:
+- Writers currently support 5.0 / 5.4(precision=1) (GRIB2), the 5.41 PNG and
+ local-use 5.49152 WebP image payloads (pre-encoded; `SetDataSection` /
+ `SetWebP`), and **`gribw1`:
  GRIB1 simple packing** (grid types 0/4, bitmap, constant fields;
  round-trip verified against real files); BUFR is only recognised and
  rejected
