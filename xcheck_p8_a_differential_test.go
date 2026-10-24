@@ -12,6 +12,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -80,6 +81,9 @@ func differentialFiles(t *testing.T, dir string, label string, strict bool) diff
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		if strict {
+			if runtime.GOOS == "js" {
+				t.Skipf("%s: js/wasm directory support depends on the host: %v", label, err)
+			}
 			t.Fatalf("%s: read %s: %v", label, dir, err)
 		}
 		return st

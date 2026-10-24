@@ -65,6 +65,7 @@ jobs:
     env:
       GOOS: js
       GOARCH: wasm
+      CGO_ENABLED: "0"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
@@ -73,7 +74,11 @@ jobs:
           cache: true
           cache-dependency-path: go.mod
       - name: Build wasm
-        run: go build ./wasm/...
+        run: go build ./...
+      - name: Test under Node
+        # The wrapper ships with the toolchain; on Linux it is executable as-is.
+        # Host-only checks (spawning a native go, fuzzing) skip themselves.
+        run: go test -count=1 -exec="$(go env GOROOT)/lib/wasm/go_js_wasm_exec" ./...
 
   generated:
     name: generated files in sync

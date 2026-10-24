@@ -8,6 +8,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -99,6 +100,9 @@ func ulpDiff32(a, b float32) int {
 func TestXcheckSimple(t *testing.T) {
 	names, err := listXcheck(xcheckDir)
 	if err != nil {
+		if runtime.GOOS == "js" {
+			t.Skipf("js/wasm directory support depends on the host: %v", err)
+		}
 		t.Fatal(err)
 	}
 	tested := 0

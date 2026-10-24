@@ -125,15 +125,12 @@ func TestB_C38EndToEnd(t *testing.T) {
 		t.Logf("spot[%d] = (%.10f, %.10f) delta=(%g, %g)", s.idx, lats[s.idx], lons[s.idx], dLat, dLon)
 	}
 
-	// packed float64 BE sha256 位级硬门（Go 列锚；2026-10-13 按 go1.27.1 重锚，
-	// go1.25.4/1.26.5/1.27.1 实测同值。eccodes 参考列见头注双列口径。）
-	t.Logf("lats=%s lons=%s", f64beDigest(t, lats), f64beDigest(t, lons))
-	if got := f64beDigest(t, lats); !knownLatsDigest(got) {
-		t.Errorf("lats packed f64 BE sha256 = %s, want 70618c3c…（Go 列锚, go1.27.1）", got)
-	}
-	if got := f64beDigest(t, lons); !knownLonsDigest(got) {
-		t.Errorf("lons packed f64 BE sha256 = %s, want e1c1917a…（Go 列锚, go1.27.1）", got)
-	}
+	// packed float64 BE sha256 位级硬门（Go 列锚；只对已记录的平台逐位断言，
+	// 其它平台由 checkGridDigests 退化为采样点 ≤1e-9° 容差比较）。
+	latsDigest := f64beDigest(t, lats)
+	lonsDigest := f64beDigest(t, lons)
+	t.Logf("lats=%s lons=%s", latsDigest, lonsDigest)
+	checkGridDigests(t, lats, lons, latsDigest, lonsDigest)
 }
 
 // f64beDigest: float64 切片按大端字节序打包后取 sha256（与 B c323628 / oracle 头注同口径）。

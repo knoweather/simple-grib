@@ -3,6 +3,7 @@ package grib
 import (
 	"bytes"
 	"os"
+	"runtime"
 	"testing"
 )
 
@@ -11,6 +12,9 @@ import (
 // cheapest way to keep that promise honest. Seeds are two real (tiny) GRIB2
 // files from testdata; the mutation corpus is not committed.
 func FuzzOpen(f *testing.F) {
+	if runtime.GOOS == "js" {
+		f.Skip("fuzzing runs on the host toolchain only (js/wasm has no coverage instrumentation)")
+	}
 	for _, name := range []string{
 		"testdata/p6-a-xcheck/p6a_ll_1xn.grib2",
 		"testdata/p6-b-xcheck/d3_simple_constant.grib2",

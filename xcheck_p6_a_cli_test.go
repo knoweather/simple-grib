@@ -96,6 +96,9 @@ func p6aRunCLI(t *testing.T, bin, fixture string, nValues int) p6aCLIFile {
 }
 
 func TestA_P6A_CLIConsistency(t *testing.T) {
+	if runtime.GOOS == "js" {
+		t.Skip("js/wasm cannot spawn a native go toolchain; the CLI check runs on the host")
+	}
 	bin := p6aCLIBinary(t)
 	const tol = 1e-9
 
