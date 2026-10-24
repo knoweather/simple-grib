@@ -22,6 +22,7 @@ import (
 
 	grib "github.com/knoweather/simple-grib"
 	"github.com/knoweather/simple-grib/grid"
+	"github.com/knoweather/simple-grib/pack"
 )
 
 // endSection is the bare "7777" tail appended after section 7; it is counted in
@@ -201,6 +202,11 @@ func (m *Message) Build() ([]byte, error) {
 // rather than written out, so the writer never emits a file the reader would
 // refuse.
 func (m *Message) checkValueCount(numValues int) error {
+	if int(binary.BigEndian.Uint16(m.sec5[9:11])) == pack.TemplateWebP {
+		// 图像载荷：numberOfValues 是像素数，与网格点数无关。
+		// Image payload: numberOfValues is the pixel count, not the grid size.
+		return nil
+	}
 	gp := m.gridDef.NumPoints()
 	if gp == 0 {
 		return fmt.Errorf("gribw: cannot verify numberOfValues %d: grid template %d has no computable point count (unimplemented or metadata-only template)",
@@ -213,10 +219,11 @@ func (m *Message) checkValueCount(numValues int) error {
 }
 
 // checkPayloadSize validates the section 7 data length against the data
-// representation template. Only template 5.0 simple packing and 5.4 IEEE
-// precision=1 are supported. Section 5 is bounds-checked against each
-// template's fixed header, so a truncated section is rejected here instead of
-// indexing out of range.
+// representation template. Supported: template 5.0 simple packing, 5.4 IEEE
+// precision=1, and the local-use WebP image template 5.49152 (section 7 is a
+// complete WebP file and numberOfValues is the pixel count). Section 5 is
+// bounds-checked against each template's fixed header, so a truncated section
+// is rejected here instead of indexing out of range.
 func (m *Message) checkPayloadSize(numValues int) error {
 	tmplNo := int(binary.BigEndian.Uint16(m.sec5[9:11])) // octets 10-11
 	switch tmplNo {
@@ -245,8 +252,13 @@ func (m *Message) checkPayloadSize(numValues int) error {
 			return fmt.Errorf("gribw: section 7 has %d bytes, IEEE precision 1 with %d values needs %d",
 				len(m.payload), numValues, want)
 		}
+	case pack.TemplateWebP:
+		// 图像载荷：第 7 段是完整 WebP 文件，numberOfValues 是像素数。
+		// Image payload: section 7 is a complete WebP file and numberOfValues
+		// is the pixel count.
+		return checkWebPPayload(numValues, m.payload)
 	default:
-		return fmt.Errorf("gribw: payload size verification for data representation template %d not implemented (supported: 0 simple packing, 4 IEEE precision=1)", tmplNo)
+		return fmt.Errorf("gribw: payload size verification for data representation template %d not implemented (supported: 0 simple packing, 4 IEEE precision=1, 49152 WebP image)", tmplNo)
 	}
 	return nil
 }

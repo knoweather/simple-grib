@@ -115,29 +115,40 @@ func itoa(n int) string {
 
 // --- E4-E5: placeholder decoders -> *pack.ErrDecoderNotConfigured ----------
 
+// p6bPlaceholder is a caller-installed placeholder: the public Register path
+// must keep surfacing *pack.ErrDecoderNotConfigured for codecs a user chooses
+// to leave unimplemented.
+type p6bPlaceholder struct{ codec string }
+
+func (p p6bPlaceholder) Name() string { return p.codec }
+
+func (p p6bPlaceholder) Unpack(ctx *pack.Context) ([]float32, error) {
+	return nil, &pack.ErrDecoderNotConfigured{Template: ctx.TemplateNumber, Codec: p.codec}
+}
+
 func TestP6B_ErrDecoderNotConfigured_Placeholders(t *testing.T) {
-	cases := []struct {
-		tmpl  int
-		codec string
-	}{
-		// Template 40 (JPEG 2000) left the placeholder set with -1: it now
-		// has a real unpacker, so it is covered by jpc_fixture_test.go instead.
-		{49152, "WebP lossless"},
+	const tmpl = 60002
+	pack.Register(tmpl, p6bPlaceholder{codec: "test codec"})
+	// Payload content is irrelevant: the placeholder fails before touching it.
+	_, err := pack.Unpack(&pack.Context{TemplateNumber: tmpl, Data: []byte{0, 1, 2}})
+	var e *pack.ErrDecoderNotConfigured
+	if !errors.As(err, &e) {
+		t.Fatalf("want *pack.ErrDecoderNotConfigured, got %T: %v", err, err)
 	}
-	for _, c := range cases {
-		t.Run("template "+itoa(c.tmpl), func(t *testing.T) {
-			// Payload content is irrelevant: the placeholder fails before
-			// touching it (pack.go placeholderUnpacker).
-			_, err := pack.Unpack(&pack.Context{TemplateNumber: c.tmpl, Data: []byte{0, 1, 2}})
-			var e *pack.ErrDecoderNotConfigured
-			if !errors.As(err, &e) {
-				t.Fatalf("want *pack.ErrDecoderNotConfigured, got %T: %v", err, err)
-			}
-			if e.Template != c.tmpl || e.Codec != c.codec {
-				t.Errorf("got {Template: %d, Codec: %q}, want {Template: %d, Codec: %q}",
-					e.Template, e.Codec, c.tmpl, c.codec)
-			}
-		})
+	if e.Template != tmpl || e.Codec != "test codec" {
+		t.Errorf("got {Template: %d, Codec: %q}, want {Template: %d, Codec: %q}",
+			e.Template, e.Codec, tmpl, "test codec")
+	}
+
+	// Template 5.49152 (WebP) is an image payload: numeric decoding must
+	// refuse with *pack.ErrNotNumeric instead of claiming a missing codec.
+	if _, err := pack.Unpack(&pack.Context{TemplateNumber: 49152}); err == nil {
+		t.Fatal("template 49152: expected an error for an empty context")
+	} else {
+		var notNumeric *pack.ErrNotNumeric
+		if !errors.As(err, &notNumeric) {
+			t.Errorf("template 49152: err = %v, want *pack.ErrNotNumeric", err)
+		}
 	}
 }
 

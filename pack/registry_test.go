@@ -96,31 +96,37 @@ func TestUnpackUnsupported(t *testing.T) {
 	}
 }
 
-// TestPlaceholderDecoders checks the 49152 placeholder fails with
-// ErrDecoderNotConfigured . Template 40 is no longer a
-// placeholder: -1 installed a real decoder for it (pack/jpc_*.go), so it
-// must now fail for a different reason (missing section 5 fields) rather than
-// claiming no decoder exists.
+// TestPlaceholderDecoders checks the placeholder pattern still reports
+// ErrDecoderNotConfigured. No built-in numeric template is a placeholder any
+// more (5.40 ships a real decoder; 5.49152 is an image payload that refuses
+// numeric decoding), so the entry is installed here.
 func TestPlaceholderDecoders(t *testing.T) {
-	for _, tmpl := range []int{TemplateWebP} {
-		ctx := &Context{TemplateNumber: tmpl}
-		_, err := Unpack(ctx)
-		if err == nil {
-			t.Fatalf("template %d: expected error", tmpl)
-		}
-		var ednc *ErrDecoderNotConfigured
-		if !errors.As(err, &ednc) || ednc.Template != tmpl {
-			t.Errorf("template %d: err = %v, want ErrDecoderNotConfigured{%d}", tmpl, err, tmpl)
-		}
-	}
+	const tmpl = 60000
+	defer delete(registry, tmpl)
+	Register(tmpl, placeholderUnpacker{codec: "test codec"})
 
-	_, err := Unpack(&Context{TemplateNumber: TemplateJPEG2000})
+	_, err := Unpack(&Context{TemplateNumber: tmpl})
 	if err == nil {
-		t.Fatalf("template 40: expected an error for an empty context")
+		t.Fatalf("template %d: expected error", tmpl)
 	}
 	var ednc *ErrDecoderNotConfigured
-	if errors.As(err, &ednc) {
+	if !errors.As(err, &ednc) || ednc.Template != tmpl || ednc.Codec != "test codec" {
+		t.Errorf("template %d: err = %v, want ErrDecoderNotConfigured{%d, test codec}", tmpl, err, tmpl)
+	}
+
+	if _, err := Unpack(&Context{TemplateNumber: TemplateJPEG2000}); err == nil {
+		t.Fatalf("template 40: expected an error for an empty context")
+	} else if errors.As(err, &ednc) {
 		t.Errorf("template 40 still reports ErrDecoderNotConfigured: %v", err)
+	}
+
+	if _, err := Unpack(&Context{TemplateNumber: TemplateWebP}); err == nil {
+		t.Fatalf("template 5.49152: expected an error for an empty context")
+	} else {
+		var notNumeric *ErrNotNumeric
+		if !errors.As(err, &notNumeric) {
+			t.Errorf("template 5.49152: err = %v, want *ErrNotNumeric", err)
+		}
 	}
 }
 

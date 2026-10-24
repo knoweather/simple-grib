@@ -72,6 +72,10 @@ func (e *ErrUnsupportedBitmap) Error() string {
 //   - without a bitmap (no section 6, or indicator 255), NumValues must equal
 //     the grid point count, otherwise it is an error;
 //   - the section 7 payload (from octet 6) is handed to pack.Unpack.
+//
+// Messages that carry the local-use WebP image template (5.49152) have no
+// numeric values: Values returns *pack.ErrNotNumeric — use WebP, WebPInfo or
+// WebPImage instead.
 func (m *Message) Values() ([]float32, error) {
 	if m.g1 != nil {
 		return m.g1.Values()
@@ -83,6 +87,14 @@ func (m *Message) Values() ([]float32, error) {
 	dr, err := m.DataRep()
 	if err != nil {
 		return nil, err
+	}
+	if dr.TemplateNumber == pack.TemplateWebP {
+		// 5.49152 是图像载荷：像素不是 GRIB 数值。早于 numberOfValues/网格
+		// 交叉校验返回，给出可操作的错误（图像走 Message.WebP/WebPImage）。
+		// 5.49152 carries an image: pixels are not GRIB values. Return before
+		// the numberOfValues/grid cross-check so the error is actionable (read
+		// the image through Message.WebP/WebPImage instead).
+		return nil, &pack.ErrNotNumeric{Template: dr.TemplateNumber, Format: "WebP image"}
 	}
 	gridPoints := g.NumPoints()
 	numValues := dr.NumValues

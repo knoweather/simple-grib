@@ -13,7 +13,7 @@ const (
 	TemplateSimple   = 0     // 网格点数据 - 简单打包 / grid point data - simple packing
 	TemplateIEEE     = 4     // 网格点数据 - IEEE 浮点 / grid point data - IEEE floating point
 	TemplateJPEG2000 = 40    // JPEG 2000 码流 / JPEG 2000 code stream
-	TemplateWebP     = 49152 // 本地使用：WebP 无损（占位）/ local use: WebP lossless (placeholder)
+	TemplateWebP     = 49152 // 本地使用：WebP 图像载荷（自定义模板 5.49152）/ local use: WebP image payload (custom template 5.49152)
 )
 
 // ErrUnsupportedValue 报告模板字段值超出内置解码器支持范围。策略是

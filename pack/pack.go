@@ -14,14 +14,16 @@ import (
 // numbers that have no registered decoder.
 var ErrUnsupported = errors.New("pack: unsupported data representation template")
 
-// ErrDecoderNotConfigured 由占位解码器返回：该编解码器需要外部库
-// （历史上的 JPEG 2000 = 40、WebP = 49152）——模板被识别，但没有接入内置
-// 编解码器。可通过 Register 在运行时安装真正的解码器。
+// ErrDecoderNotConfigured 由占位解码器返回：模板被识别，但该编解码器没有内置
+// 实现（所有内置数值模板 5.0/5.2/5.3/5.4/5.40/5.42 都已接通；5.49152 是 WebP
+// 图像载荷，会返回 ErrNotNumeric 而不是走数值解码）。调用方可以用 Register
+// 注册自己的解码器，或注册一个占位解码器表达“需要外部库”。
 //
-// ErrDecoderNotConfigured is returned by placeholder decoders for codecs
-// that need an external library (JPEG 2000 = 40, WebP = 49152 in the past):
-// the template is recognized but no built-in codec is wired up. A real
-// decoder can be installed at runtime via Register.
+// ErrDecoderNotConfigured is returned by placeholder decoders: the template is
+// recognized but no built-in codec is wired up (every built-in numeric template
+// — 5.0/5.2/5.3/5.4/5.40/5.42 — ships with a decoder; 5.49152 is a WebP image
+// payload and reports ErrNotNumeric instead of decoding values). Callers can
+// install their own decoder, or a placeholder, through Register.
 type ErrDecoderNotConfigured struct {
 	Template int
 	Codec    string
@@ -88,7 +90,8 @@ func init() {
 	Register(TemplateComplexPlain, complexPlainUnpacker{})
 	Register(TemplateCCSDS, ccsdsUnpacker{})
 	Register(TemplateJPEG2000, jpcUnpacker{})
-	Register(TemplateWebP, placeholderUnpacker{codec: "WebP lossless"})
+	// Template 49152 (WebP) registers its local-use section 5 layout and its
+	// refusing unpacker in webp.go's init.
 }
 
 // Register 为某个数据表示模板号安装（或替换）解码器。
@@ -171,11 +174,14 @@ func (ieeeUnpacker) Unpack(ctx *Context) ([]float32, error) {
 	return ieeeDecode(IEEE{Precision: precision}, ctx.Data, ctx.NumValues)
 }
 
-// placeholderUnpacker 代表需要外部库的编解码器：模板被识别，
-// 但没有内置解码器。
+// placeholderUnpacker 代表需要外部库的编解码器：模板被识别，但没有内置
+// 解码器。内置模板不再使用它，但它仍是 Register 的公开用法示例，测试也用它
+// 固定 ErrDecoderNotConfigured 的契约。
 //
 // placeholderUnpacker stands in for codecs that need an external library:
-// the template is recognized, but there is no built-in decoder.
+// the template is recognized, but there is no built-in decoder. No built-in
+// template uses it any more; it remains the documented Register pattern and
+// the test fixture for the ErrDecoderNotConfigured contract.
 type placeholderUnpacker struct {
 	codec string
 }
