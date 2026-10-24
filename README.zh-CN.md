@@ -70,7 +70,7 @@ for m, err := range f.Messages() {
 | 网格坐标：3.0/3.1/3.2/3.3（+rotated）、3.40/3.41 Gaussian、**3.20 polar stereographic / 3.30 Lambert conformal 逐点坐标** | ✅ |
 | 数据解码：5.0 simple（任意位宽位流）、5.2 complex、5.3 complex+spatial differencing、5.4 IEEE binary32、**5.40 JPEG 2000（纯 Go JPC 解码器）**、**5.41 PNG（灰度 1/2/4/8/16 bit）**、5.42 CCSDS AEC（自研 codec）；5.49152 承载 WebP 图像载荷（local-use，原样存储；头解析/解码经 `simple-webp`） | ✅ |
 | bitmap（section 6，indicator 0/255）+ 声明点数交叉校验 | ✅ |
-| writer `gribw`：模板驱动编码 5.0 / 5.4，round-trip 测试；5.41 PNG 与 5.49152 WebP 经 `SetDataSection`/`SetWebP` 写入预编码图像；local 表注册 | ✅ |
+| writer `gribw`：模板驱动编码 5.0 / 5.4，round-trip 测试；5.41 PNG（`SetPNG`）与 5.49152 WebP（`SetWebP`）图像；local 表注册 | ✅ |
 | writer `gribw1`：GRIB1 编码（简单打包，类型 0/4 网格 + 位图 + 常量场） | ✅ |
 | CLI `gribdump`：元数据 / 数值 / 逐字段 Walk / JSON / WebP 图像导出 | ✅ |
 | **WASM** `wasm/`：浏览器 / Node 里直接解码（GRIB1 + GRIB2），元数据 + 数值 + 坐标以 TypedArray 出参；含拖拽即用的查看器 | ✅ |
@@ -280,12 +280,12 @@ L1 线格式层 File（io.ReaderAt + 消息索引）→ Message（整条缓冲�
 
 - 数据模板 5.1 / 5.5x spectral / 5.200 run-length → `pack.ErrUnsupported` fail-loud
 - JPEG 2000 5.40：仅支持可逆 5/3 变换、LRCP、单层、单分量；不可逆 9/7、多层/多分量码流，以及 COC/QCC/RGN/POC/PPM/PPT/SOP/EPH marker 段 → `pack.ErrJPCUnsupported`
-- PNG 5.41：仅灰度，位深 1/2/4/8/16 且必须等于 `bitsPerValue`；彩色、带透明、调色板 PNG 一律 fail-loud；writer 可通过 `SetDataSection` 写入预编码 PNG，但不做像素编码
+- PNG 5.41：仅灰度，位深 1/2/4/8/16 且必须等于 `bitsPerValue`；彩色、带透明、调色板 PNG 一律 fail-loud；`SetPNG` 可直接从数值编码灰度图，预编码 PNG 仍可走 `SetDataSection`
 - local-use 模板 49152（WebP）是**不透明的图像载荷**：`SetWebP`/`WebP` 原字节存取，`Values` 返回 `pack.ErrNotNumeric`；有损、动画都接受（动画由 `WebPImage` 取首帧）；图像尺寸不必等于网格点数——`numberOfValues` 记录的是像素数
 - IEEE 5.4 仅 precision=1（binary32）；64/128-bit → fail-loud
 - bitmap indicator 1–254（中心预定）→ fail-loud
 - 网格：其余投影类（3.10/3.12/3.31…）与 stretched Gaussian（3.42/3.43）为 metadata-only，`Point/Lats/Lons` → `grid.ErrNotImplemented`
-- writer 现支持 5.0 / 5.4(precision=1)（GRIB2）、5.41 PNG 与 local-use 5.49152 WebP 图像载荷（预编码，`SetDataSection`/`SetWebP`）与 **`gribw1`：GRIB1 简单打包编码**（类型 0/4 网格、位图、常量场；round-trip 对拍真实文件通过）；BUFR 仅识别并报错
+- writer 现支持 5.0 / 5.4(precision=1)（GRIB2）、5.41 PNG（`SetPNG`，灰度 1/2/4/8/16 bit）与 local-use 5.49152 WebP 图像（`SetWebP`）与 **`gribw1`：GRIB1 简单打包编码**（类型 0/4 网格、位图、常量场；round-trip 对拍真实文件通过）；BUFR 仅识别并报错
 
 ## 文档索引
 
