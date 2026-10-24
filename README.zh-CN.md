@@ -81,6 +81,10 @@ for m, err := range f.Messages() {
 go get github.com/knoweather/simple-grib
 ```
 
+每个 [release](https://github.com/knoweather/simple-grib/releases) 附带
+linux/amd64、linux/arm64、linux/loong64、windows/amd64、darwin/arm64 的
+`gribdump` 预编译二进制。
+
 ## 快速开始
 
 ```sh

@@ -100,6 +100,10 @@ like ecCodes' `codetable_title`; `grib1.RegisterTable2` still overrides it.
 go get github.com/knoweather/simple-grib
 ```
 
+Prebuilt `gribdump` binaries for linux/amd64, linux/arm64, linux/loong64,
+windows/amd64 and darwin/arm64 are attached to each
+[release](https://github.com/knoweather/simple-grib/releases).
+
 ## Quick start
 
 ```sh
