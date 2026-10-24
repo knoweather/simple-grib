@@ -526,7 +526,7 @@ func messageOutput(m *grib.Message, path string, i, nValues int, sections []int)
 			var eus *grib.ErrUnsupportedBitmap
 			switch {
 			case errors.As(err, &eni):
-				addErr(&mo, "values", fmt.Errorf("grid template %d not implemented in P1", eni.Template))
+				addErr(&mo, "values", fmt.Errorf("grid template %d not implemented", eni.Template))
 			case errors.As(err, &ednc):
 				addErr(&mo, "values", fmt.Errorf("template %d (%s): decoder not configured", ednc.Template, ednc.Codec))
 			case errors.Is(err, pack.ErrUnsupported):

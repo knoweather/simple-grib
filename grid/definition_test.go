@@ -659,8 +659,8 @@ func TestDefinitionReducedUnverifiedGuard(t *testing.T) {
 		}
 		if _, _, err := g.Point(0); err == nil {
 			t.Errorf("%s: Point: expected fail-loud, got success", tc.name)
-		} else if !strings.Contains(err.Error(), "not verified in P1") {
-			t.Errorf("%s: Point error = %v, want 'not verified in P1' guard", tc.name, err)
+		} else if !strings.Contains(err.Error(), "coordinates not implemented") {
+			t.Errorf("%s: Point error = %v, want 'coordinates not implemented' guard", tc.name, err)
 		}
 	}
 }

@@ -295,8 +295,8 @@ func TestReducedGaussianNonGaussianQuasiUnchanged(t *testing.T) {
 			t.Errorf("NumPoints = %d, want 9", g.NumPoints())
 		}
 		// The pre-existing fail-loud guard for reduced+rotated coordinates.
-		if _, _, err := g.Point(0); err == nil || !strings.Contains(err.Error(), "not verified in P1") {
-			t.Errorf("Point(0) err = %v, want the 'not verified in P1' guard", err)
+		if _, _, err := g.Point(0); err == nil || !strings.Contains(err.Error(), "coordinates not implemented") {
+			t.Errorf("Point(0) err = %v, want the 'coordinates not implemented' guard", err)
 		}
 	})
 }

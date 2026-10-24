@@ -10,7 +10,7 @@
 // Scope note (disclosed in the report): the bitmap+CCSDS combination
 // (original matrix C3) is DROPPED — (i) it is already covered by the
 // accepted wave anchor (C48 bitmap missing-value path, bit-exact sample
-// placement vs eccodes), and (ii) the the Linux bench host SWIG binding cannot mark missing
+// placement vs eccodes), and (ii) the Linux bench host SWIG binding cannot mark missing
 // values for template 42 (NaN → garbage bits; same toolchain limitation A2
 // hit in , board line 2241c). All-zero and explicit-bits cases below are
 // lossless and additionally checked against the input vector.

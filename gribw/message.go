@@ -207,7 +207,7 @@ func (m *Message) checkValueCount(numValues int) error {
 			numValues, m.gridDef.TemplateNumber())
 	}
 	if gp != numValues {
-		return fmt.Errorf("gribw: section 5 numberOfValues %d != grid point count %d ( emits no bitmap)", numValues, gp)
+		return fmt.Errorf("gribw: section 5 numberOfValues %d != grid point count %d (the writer emits no bitmap)", numValues, gp)
 	}
 	return nil
 }
@@ -238,7 +238,7 @@ func (m *Message) checkPayloadSize(numValues int) error {
 			return fmt.Errorf("gribw: section 5 template 5.4 needs at least 12 bytes (precision at octet 12), section has %d", len(m.sec5))
 		}
 		if prec := m.sec5[11]; prec != 1 { // octet 12，表 5.7
-			return fmt.Errorf("gribw: IEEE precision %d not supported by the writer ", prec)
+			return fmt.Errorf("gribw: IEEE precision %d not supported by the writer", prec)
 		}
 		want := int64(numValues) * 4
 		if int64(len(m.payload)) != want {
@@ -246,7 +246,7 @@ func (m *Message) checkPayloadSize(numValues int) error {
 				len(m.payload), numValues, want)
 		}
 	default:
-		return fmt.Errorf("gribw: payload size verification for data representation template %d not implemented in (supported: 0 simple packing, 4 IEEE precision=1)", tmplNo)
+		return fmt.Errorf("gribw: payload size verification for data representation template %d not implemented (supported: 0 simple packing, 4 IEEE precision=1)", tmplNo)
 	}
 	return nil
 }

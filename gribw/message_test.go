@@ -550,7 +550,7 @@ func TestBuildFailLoud(t *testing.T) {
 			}
 			_, e := m.Build()
 			return e
-		}, "not implemented in "},
+		}, "not implemented (supported: "},
 		{"discipline out of range", func(m *Message) error { return New().SetDiscipline(256) }, "out of range"},
 		// Note: no "invalid reference time" case — a Go time.Time is always
 		// normalized (time.Date(2026, 2, 30) becomes Mar 2), so encodeSec1's

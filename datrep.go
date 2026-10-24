@@ -59,7 +59,7 @@ func (m *Message) DataRep() (*DataRep, error) {
 type ErrUnsupportedBitmap struct{ Indicator int }
 
 func (e *ErrUnsupportedBitmap) Error() string {
-	return fmt.Sprintf("grib: section 6: unsupported bitmap indicator %d (P1 (m) => m", e.Indicator)
+	return fmt.Sprintf("grib: section 6: unsupported bitmap indicator %d (only 0 = bitmap in this section and 255 = no bitmap are supported)", e.Indicator)
 }
 
 // Values decodes all data values of the message in scan order. It ties

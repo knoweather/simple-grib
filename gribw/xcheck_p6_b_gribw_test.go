@@ -7,7 +7,7 @@
 // the parameters used — no assertion anchor from the tested side is reused.
 // Each case: gribw writes a full GRIB2 message → self-read round-trip via
 // the reader must be BIT-EXACT (Float32bits equality). The written files are
-// also emitted to testdata/p6-b-xcheck/ for the the Linux bench host eccodes read-back
+// also emitted to testdata/p6-b-xcheck/ for the Linux bench host eccodes read-back
 // cross-check (independent decoder; commands + sha256 recorded in the
 // report post).
 //

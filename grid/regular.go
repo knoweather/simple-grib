@@ -47,11 +47,11 @@ func (p *regularParams) points() ([]Point, error) {
 		return nil, fmt.Errorf("grid: Ni=%d Nj=%d, want >= 1", p.Ni, p.Nj)
 	}
 	if m := p.ScanMode & scanOffsets; m != 0 {
-		return nil, fmt.Errorf("grid: scan mode %d sets odd/even line offset bit(s) %d, not supported in P1", p.ScanMode, m)
+		return nil, fmt.Errorf("grid: scan mode %d sets odd/even line offset bit(s) %d, not supported", p.ScanMode, m)
 	}
 	serpentine := p.ScanMode&scanFirstRev != 0
 	if serpentine && p.ScanMode&scanJFast != 0 {
-		return nil, fmt.Errorf("grid: scan mode %d: first-line reversal combined with j-fastest is not supported in P1", p.ScanMode)
+		return nil, fmt.Errorf("grid: scan mode %d: first-line reversal combined with j-fastest is not supported", p.ScanMode)
 	}
 
 	iDir := 1.0

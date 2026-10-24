@@ -96,7 +96,7 @@ func ccsdsSamplesDir(t *testing.T) string {
 
 // ccsdsF32BEDigest is the FULL-PRECISION digest: float32 values -> big-endian
 // bytes -> md5. No %.10e text round-trip (that channel double-rounds and shifts
-// ~1% of samples by 1 ulp — see file header). This is exactly what the the Linux bench host
+// ~1% of samples by 1 ulp — see file header). This is exactly what the Linux bench host
 // python gribapi anchor probe computes from eccodes' exact doubles.
 func ccsdsF32BEDigest(vals []float32) string {
 	h := md5.New()

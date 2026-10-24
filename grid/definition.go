@@ -980,13 +980,13 @@ func (g *Definition) ensurePoints() error {
 		// implementation verifies the rotated combination. Fail loud at
 		// coordinate time; metadata stays readable.
 		if g.rotated && g.stretched {
-			return fmt.Errorf("grid: quasi-regular grid with rotation and stretching: coordinates not verified in P1 , fail-loud: withheld")
+			return fmt.Errorf("grid: quasi-regular grid with rotation and stretching: coordinates not implemented (fail-loud rather than guessing)")
 		}
 		if g.rotated {
-			return fmt.Errorf("grid: quasi-regular grid with rotation: coordinates not verified in P1 , fail-loud: withheld")
+			return fmt.Errorf("grid: quasi-regular grid with rotation: coordinates not implemented (fail-loud rather than guessing)")
 		}
 		if g.stretched {
-			return fmt.Errorf("grid: quasi-regular grid with stretching: coordinates not verified in P1 , fail-loud: withheld")
+			return fmt.Errorf("grid: quasi-regular grid with stretching: coordinates not implemented (fail-loud rather than guessing)")
 		}
 		base, err = g.reducedPoints()
 	case kindGaussian:
@@ -1020,11 +1020,11 @@ func (g *Definition) regularPoints() ([]Point, error) {
 		return nil, fmt.Errorf("grid: Ni=%d Nj=%d, want >= 1", ni, nj)
 	}
 	if m := g.scanMode & scanOffsets; m != 0 {
-		return nil, fmt.Errorf("grid: scan mode %d sets odd/even line offset bit(s) %d, not supported in P1", g.scanMode, m)
+		return nil, fmt.Errorf("grid: scan mode %d sets odd/even line offset bit(s) %d, not supported", g.scanMode, m)
 	}
 	serpentine := g.scanMode&scanFirstRev != 0
 	if serpentine && g.scanMode&scanJFast != 0 {
-		return nil, fmt.Errorf("grid: scan mode %d: first-line reversal combined with j-fastest is not supported in P1", g.scanMode)
+		return nil, fmt.Errorf("grid: scan mode %d: first-line reversal combined with j-fastest is not supported", g.scanMode)
 	}
 
 	jDir := 1.0
@@ -1071,7 +1071,7 @@ func (g *Definition) regularPoints() ([]Point, error) {
 // is the only reading. j-fastest is rejected.
 func (g *Definition) reducedPoints() ([]Point, error) {
 	if g.scanMode&scanJFast != 0 {
-		return nil, fmt.Errorf("grid: quasi-regular grid with j-fastest scan mode %d is not supported in P1", g.scanMode)
+		return nil, fmt.Errorf("grid: quasi-regular grid with j-fastest scan mode %d is not supported", g.scanMode)
 	}
 	rp := g.reduced
 

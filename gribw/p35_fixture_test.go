@@ -16,7 +16,7 @@ import (
 // TestP35DualFixtureEmit writes testdata/gribw-xcheck/p35_dual.grib2 when
 // GRIBW_GOLDEN_EMIT=1 (same env-gate pattern as TestGoldenEmit). The emitted
 // file is committed as an oracle input fixture; its md5 is asserted by the
-// in-repo round-trip tests and re-verified by the the Linux bench host oracle harness.
+// in-repo round-trip tests and re-verified by the Linux bench host oracle harness.
 func TestP35DualFixtureEmit(t *testing.T) {
 	if os.Getenv("GRIBW_GOLDEN_EMIT") != "1" {
 		t.Skip("set GRIBW_GOLDEN_EMIT=1 to (re)generate the dual fixture")
