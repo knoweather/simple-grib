@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"image"
 	"image/png"
+	"math"
 	"strings"
 	"testing"
 
@@ -132,5 +133,91 @@ func TestPNGWriterRejectsShortCanvas(t *testing.T) {
 	_, err = gribw.File(msg)
 	if err == nil || !strings.Contains(err.Error(), "numberOfValues") {
 		t.Fatalf("File error = %v, want a canvas/numberOfValues error", err)
+	}
+}
+
+func buildPNGWriterMessage(t *testing.T, values []float32, bits int) []byte {
+	t.Helper()
+	fl, err := grib.Open("testdata/gribw-xcheck/t20_grid_3x3.grib2")
+	if err != nil {
+		t.Fatalf("open fixture: %v", err)
+	}
+	defer fl.Close()
+	m, _ := fl.Message(0)
+	g, _ := m.Grid()
+	id, _ := m.Identification()
+	p, _ := m.Product()
+
+	msg := gribw.New()
+	if err := msg.SetDiscipline(m.Discipline()); err != nil {
+		t.Fatalf("SetDiscipline: %v", err)
+	}
+	if err := msg.SetIdentification(id); err != nil {
+		t.Fatalf("SetIdentification: %v", err)
+	}
+	if err := msg.SetGrid(g); err != nil {
+		t.Fatalf("SetGrid: %v", err)
+	}
+	if err := msg.SetProduct(p); err != nil {
+		t.Fatalf("SetProduct: %v", err)
+	}
+	if err := msg.SetPNG(values, gribw.SimpleParams{Bits: bits}); err != nil {
+		t.Fatalf("SetPNG: %v", err)
+	}
+	data, err := gribw.File(msg)
+	if err != nil {
+		t.Fatalf("File: %v", err)
+	}
+	return data
+}
+
+func TestPNGWriterDepths(t *testing.T) {
+	for _, tc := range []struct {
+		bits   int
+		values []float32
+	}{
+		{1, []float32{0, 1, 0, 1, 1, 0, 1, 0, 1}},
+		{2, []float32{0, 1, 2, 3, 0, 2, 1, 3, 2}},
+		{4, []float32{0, 1, 2, 3, 4, 5, 6, 7, 15}},
+		{8, []float32{0, 1, 2, 3, 4, 5, 6, 7, 255}},
+		{16, []float32{0, 1, 255, 256, 1000, 65535, 7, 8, 9}},
+	} {
+		data := buildPNGWriterMessage(t, tc.values, tc.bits)
+		f, err := grib.OpenReader(bytes.NewReader(data), int64(len(data)))
+		if err != nil {
+			t.Fatalf("bits=%d: OpenReader: %v", tc.bits, err)
+		}
+		m, err := f.Message(0)
+		if err != nil {
+			t.Fatalf("bits=%d: Message: %v", tc.bits, err)
+		}
+		got, err := m.Values()
+		f.Close()
+		if err != nil {
+			t.Fatalf("bits=%d: Values: %v", tc.bits, err)
+		}
+		for i, want := range tc.values {
+			if got[i] != want {
+				t.Errorf("bits=%d value[%d] = %v, want %v", tc.bits, i, got[i], want)
+			}
+		}
+	}
+}
+
+func TestPNGWriterRejectsUnsupportedBits(t *testing.T) {
+	for _, bits := range []int{0, 3, 5, 32} {
+		_, _, err := gribw.EncodePNG([]float32{0}, gribw.SimpleParams{Bits: bits})
+		if err == nil {
+			t.Errorf("bits=%d: EncodePNG succeeded, want an error", bits)
+		}
+	}
+}
+
+func TestPNGWriterRejectsRawOutOfRange(t *testing.T) {
+	if _, _, err := gribw.EncodePNG([]float32{300}, gribw.SimpleParams{Bits: 8}); err == nil {
+		t.Error("raw out of range accepted; want fail-loud")
+	}
+	if _, _, err := gribw.EncodePNG([]float32{float32(math.Inf(1))}, gribw.SimpleParams{Bits: 8}); err == nil {
+		t.Error("+Inf accepted; want fail-loud")
 	}
 }
