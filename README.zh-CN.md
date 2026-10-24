@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/gopher.svg" width="112" alt="The Go gopher, holding a network cable">
+  <img src="docs/logo.svg" width="128" alt="The Go gopher holding a small globe">
 </p>
 
 <h1 align="center">simple-grib</h1>
@@ -279,5 +279,4 @@ L1 线格式层 File（io.ReaderAt + 消息索引）→ Message（整条缓冲�
 
 Go gopher 由 [Renee French](https://reneefrench.blogspot.com/) 设计，采用
 [CC BY 3.0](https://creativecommons.org/licenses/by/3.0/) 许可；
-[`docs/gopher.svg`](docs/gopher.svg) 里的这幅画由
-[Egon Elbre](https://github.com/egonelbre/gophers) 绘制，以 CC0 发布。
+[`docs/logo.svg`](docs/logo.svg) 的 logo 是基于该形象的演绎作品。

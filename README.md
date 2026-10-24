@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/gopher.svg" width="112" alt="The Go gopher, holding a network cable">
+  <img src="docs/logo.svg" width="128" alt="The Go gopher holding a small globe">
 </p>
 
 <h1 align="center">simple-grib</h1>
@@ -352,6 +352,5 @@ Model credits:
 ## Credits
 
 The Go gopher was designed by [Renee French](https://reneefrench.blogspot.com/) and is
-licensed under [CC BY 3.0](https://creativecommons.org/licenses/by/3.0/). The drawing in
-[`docs/gopher.svg`](docs/gopher.svg) is by
-[Egon Elbre](https://github.com/egonelbre/gophers) and released under CC0.
+licensed under [CC BY 3.0](https://creativecommons.org/licenses/by/3.0/). The logo in
+[`docs/logo.svg`](docs/logo.svg) is a derivative work based on that design.
