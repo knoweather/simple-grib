@@ -222,11 +222,10 @@ res.messages[0].grid.lats; // Float64Array（perPoint 时与 values 同序）
 
 `wasm/viewer.html` 是个现成的单文件查看器：**拖入 `.grib2` 就出结果** —— 消息列表、identification/product/grid 元数据（码表名由 Go 侧查好）、数值场渲染（规则网格画栅格、投影网格自动改画散点，含悬停读数）、前 200 行数值表，还能导出 CSV / PNG / 元数据 JSON。
 
-**实测兼容性**：`GOOS=js GOARCH=wasm go build ./...` 所有包干净通过；`spec` / `grid` / `gribw` /
-`internal/octetio` / `probe` / `cmd/gribdump` / `wasm` 的测试在 Node 下全绿。少数失败与库逻辑无关：
-js/wasm 在 **Windows 宿主**下不支持读目录（Linux 宿主可以）、测试内部起 `go build` 子进程、
-以及**跨架构位级浮点差异**（amd64 `GOAMD64=v3` 的 FMA 融合 + `math.Exp/Pow` 的 amd64 汇编实现，
-与 wasm 差 1~4 ulp）—— 结论是位级 sha256 锚不能跨架构复用，跨架构校验要用容差。逐项证据见
+**实测兼容性**：`GOOS=js GOARCH=wasm go build ./...` 所有包干净通过；CI 在 Linux 上用 Node 跑完整测试。
+坐标锚按平台分流：packed-float64 digest 只在已记录的 amd64 / darwin-arm64 构建上逐位断言，其它平台
+（wasm、其它 GOARCH/GOAMD64）改验 192 个采样点 ≤1e-9°。宿主专属检查（起 `go build` 子进程、fuzz）
+在 js/wasm 下自动 skip；**Windows 宿主**的 js/wasm 仍不支持读目录（Linux 宿主可以）。逐项证据见
 [`wasm/README.md`](wasm/README.md#兼容性实测)。
 
 ## 性能对比

@@ -251,14 +251,13 @@ grids draw a raster, projected grids draw a scatter with hover readouts),
 first 200 rows as a value table, plus CSV / PNG / metadata JSON export.
 
 **Measured compatibility**: `GOOS=js GOARCH=wasm go build ./...` passes clean
-for every package; tests of `spec` / `grid` / `gribw` / `internal/octetio` /
-`probe` / `cmd/gribdump` / `wasm` all pass under Node. The few failures are
-unrelated to library logic: js/wasm under a **Windows host** cannot read
-directories (Linux hosts can), tests that spawn `go build` subprocesses, and
-**cross-architecture bit-level float differences** (amd64 `GOAMD64=v3` FMA
-fusion + `math.Exp/Pow` assembly vs wasm, 1–4 ulp apart) — bit-level sha256
-anchors therefore cannot be reused across architectures; cross-architecture
-checks must use tolerances. Item-by-item evidence in
+for every package, and CI runs the whole suite under Node on Linux. Coordinate
+anchors are gated per platform: the packed-float64 digests stay bit-exact on
+the recorded amd64 and darwin/arm64 builds, while other platforms (wasm, other
+GOARCH or GOAMD64 variants) must reproduce 192 sampled points within 1e-9°.
+Host-only checks — spawning a native `go build` and fuzzing — skip on js/wasm;
+js/wasm under a **Windows host** still cannot list directories (Linux hosts
+can). Item-by-item evidence in
 [`wasm/README.md`](wasm/README.md#兼容性实测).
 
 ## Performance comparison

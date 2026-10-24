@@ -121,43 +121,41 @@ GRIB1 消息的 `identification.productionStatus` / `typeOfProcessedData` 为 -1
 
 ## wasm 兼容性说明
 
-在 `GOOS=js GOARCH=wasm` 下 `go build ./...` 全部包均通过编译。
-测试（Node 22 + go1.27.1，宿主 Windows）的结果如下：
+在 `GOOS=js GOARCH=wasm` 下 `go build ./...` 全部包均通过编译；CI 在 Linux 上用
+Node 跑完整测试（`go test -exec="$(go env GOROOT)/lib/wasm/go_js_wasm_exec" ./...`）。
 
-| 包 | 结果 |
-|---|---|
-| `spec` `grid` `gribw` `internal/octetio` `probe` `cmd/gribdump` | 全部通过 |
-| `wasm`（本目录） | 全部通过（含 JS 侧 TypedArray / opts / fail-loud 断言） |
-| 根包 | 5 个用例在 js/wasm 环境下失败，原因见下 |
-| `pack` | 1 个用例失败：读目录（环境，见下） |
-| `bench/p7_decode_bench` `cmd/specgen` | — 无测试文件 |
+| 包 | Linux 宿主（CI） | Windows 宿主（本地实测） |
+|---|---|---|
+| `spec` `grid` `gribw` `internal/octetio` `probe` `cmd/gribdump` `wasm` | 全部通过 | 全部通过 |
+| 根包 | 全部通过 | 2 个读目录用例失败（见下），其余通过 |
+| `pack` | 全部通过 | 1 个读目录用例失败 |
+| `bench/p7_decode_bench` `cmd/specgen` | — 无测试文件 | — |
 
 三处与库逻辑无关的环境/平台差异：
 
 1. **读目录**：Go 的 js/wasm `syscall.Open` 在 **Windows 宿主**上不支持 `O_DIRECTORY`
-  （`syscall/fs_js.go`：Node 的 libuv 在 Windows 上没这个常量）。Linux 宿主
-  下这些用例可以正常运行。受影响：`pack/xcheck_test.go`、`xcheck_p8_a_differential_test.go`、
+  （`syscall/fs_js.go`：Node 的 libuv 在 Windows 上没这个常量）；Linux 宿主下正常。
+  受影响：`pack/xcheck_test.go`、`xcheck_p8_a_differential_test.go`、
   `xcheck_p8_a_parallel_test.go`。
-2. **测试内部起子进程**：`xcheck_p6_a_cli_test.go` 里 `go build ./cmd/gribdump` ——
-  sandbox/Node 环境没有 `go` 可执行文件。与 wasm 无关。
-3. **跨架构浮点位级差异**：`grid_c38_e2e_test.go` / `grid_t30_baseline_test.go`
-  把坐标打包后比 sha256，锚值记录于 amd64。wasm 下差 **1~4 ulp**（≈1e-14 度 ≈ 纳米级），
-  几何上完全等价。根因两条：
-
- | 项 | 证据 |
- |---|---|
- | **FMA 融合**（`GOAMD64=v3`） | 同一台机器把 `GOAMD64` 从 v3 降到 v1 重跑，`Sin/Cos/Tan/Atan/Asin/Acos` 以及纯算术表达式的哈希立即与 wasm 一致 —— v3 会把 `a*b+c` 融成 FMA（单次舍入），wasm 后端不融合 |
- | **架构专属汇编** | `math.Exp` / `math.Pow` 在 amd64 有手写汇编实现，与 wasm 走的通用纯 Go 版本结果不同（Go 已知的跨架构 1 ulp 级差异），与 `GOAMD64` 无关 |
-
- 因此按位比较的 sha256 锚是平台绑定的，不能跨架构复用；跨架构校验要用容差比较，
- 或按 `GOARCH`/`GOAMD64` 分别记锚。
+2. **宿主专属检查自动 skip**：`xcheck_p6_a_cli_test.go`（起 `go build` 子进程）与
+  `FuzzOpen`（fuzz 需要宿主覆盖插桩）在 js/wasm 下 `t.Skip`，不计为失败。
+3. **跨架构浮点**：坐标锚按平台分流——已记录的 amd64 / darwin-arm64 构建继续做
+  packed-float64 sha256 逐位断言；wasm 等其它平台改验 192 个采样点
+  （`grid_anchor_test.go`，≤1e-9°）。wasm 与 amd64 的实际差仍是 **1~4 ulp**
+  （≈1e-14 度），采样容差有六个数量级余量，真正的公式/扫描序回归仍会失败。
+  根因两条：`GOAMD64=v3` 的 FMA 融合，以及 `math.Exp`/`math.Pow` 的 amd64
+  汇编实现与 wasm 通用实现不同。
 
 ### 怎么在 Node 里跑 wasm 测试
 
 ```sh
 export GOOS=js GOARCH=wasm CGO_ENABLED=0
+
+# Linux/macOS（CI 同款）：工具链自带的 bash 包装器
+go test -count=1 -exec="$(go env GOROOT)/lib/wasm/go_js_wasm_exec" ./...
+
+# Windows：go_js_wasm_exec 是 bash 脚本，改用 node 直接跑胶水
 go test -c -o /tmp/x.test.wasm ./grid
-# Go 自带的 go_js_wasm_exec 是 bash 脚本，Windows 下直接用 node 跑胶水：
 node "$(go env GOROOT)/lib/wasm/wasm_exec_node.js" /tmp/x.test.wasm -test.v
 ```
 
