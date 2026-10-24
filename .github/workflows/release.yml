@@ -1,0 +1,60 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing tag to publish (for example v0.0.4)"
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  release:
+    name: gribdump binaries
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      CGO_ENABLED: "0"
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: "1.27.1"
+          cache: true
+          cache-dependency-path: go.mod
+      - name: Build binaries
+        run: |
+          set -euo pipefail
+          tag="${{ inputs.tag || github.ref_name }}"
+          mkdir -p dist
+          build() {
+            goos="$1"
+            goarch="$2"
+            ext="$3"
+            name="gribdump_${tag}_${goos}_${goarch}${ext}"
+            GOOS="$goos" GOARCH="$goarch" go build -trimpath -ldflags "-s -w" \
+              -o "dist/${name}" ./cmd/gribdump
+            (cd dist && sha256sum "${name}" > "${name}.sha256")
+          }
+          build linux   amd64   ""
+          build linux   arm64   ""
+          build linux   loong64 ""
+          build windows amd64   ".exe"
+          build darwin  arm64   ""
+          ls -l dist
+      - name: Publish release
+        run: |
+          set -euo pipefail
+          tag="${{ inputs.tag || github.ref_name }}"
+          if gh release view "$tag" >/dev/null 2>&1; then
+            gh release upload "$tag" dist/* --clobber
+          else
+            gh release create "$tag" dist/* --verify-tag \
+              --title "$tag" --notes-from-tag
+          fi
