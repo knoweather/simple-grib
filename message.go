@@ -69,7 +69,7 @@ func newMessageWithTotal(index int, off int64, data []byte, total int) (*Message
 func newMessageOpts(index int, off int64, data []byte, total int, opts parseOpts) (*Message, error) {
 	secs, err := parseSectionsOpts(data, total, opts)
 	if err != nil {
-		return nil, fmt.Errorf("grib: message %d at offset %d: %w", index, off, err)
+		return nil, fmt.Errorf("%w (message %d at offset %d)", err, index, off)
 	}
 	byNum := make(map[int]Section, len(secs))
 	for _, s := range secs {

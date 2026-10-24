@@ -78,7 +78,7 @@ func parseSectionsWithTotal(data []byte, total int) ([]Section, error) {
 
 func parseSectionsOpts(data []byte, total int, opts parseOpts) ([]Section, error) {
 	if len(data) < 16 {
-		return nil, fmt.Errorf("grib: %w (message has only %d bytes)", ErrTruncated, len(data))
+		return nil, fmt.Errorf("%w (message has only %d bytes)", ErrTruncated, len(data))
 	}
 	secs := []Section{{Number: 0, Length: len(data), Data: data[0:16]}}
 	pos := 16
@@ -88,7 +88,7 @@ func parseSectionsOpts(data []byte, total int, opts parseOpts) ([]Section, error
 			// The remaining bytes can only be the section 8 end marker "7777".
 			rem := data[pos:]
 			if !opts.lenientEndSection && !isEndMarker(rem) {
-				return nil, fmt.Errorf("grib: %w (%d trailing bytes after the last section are not the '7777' end section)",
+				return nil, fmt.Errorf("%w (%d trailing bytes after the last section are not the '7777' end section)",
 					ErrBadSectionLength, len(rem))
 			}
 			break
@@ -96,10 +96,10 @@ func parseSectionsOpts(data []byte, total int, opts parseOpts) ([]Section, error
 		slen := int(binary.BigEndian.Uint32(data[pos : pos+4]))
 		num := int(data[pos+4])
 		if slen < 5 {
-			return nil, fmt.Errorf("grib: %w (section at offset %d claims length %d)", ErrBadSectionLength, pos, slen)
+			return nil, fmt.Errorf("%w (section at offset %d claims length %d)", ErrBadSectionLength, pos, slen)
 		}
 		if slen > len(data)-pos {
-			return nil, fmt.Errorf("grib: %w (section at offset %d claims %d bytes, only %d left in message)",
+			return nil, fmt.Errorf("%w (section at offset %d claims %d bytes, only %d left in message)",
 				ErrBadSectionLength, pos, slen, len(data)-pos)
 		}
 		if num <= secs[len(secs)-1].Number {
@@ -117,7 +117,7 @@ func parseSectionsOpts(data []byte, total int, opts parseOpts) ([]Section, error
 		}
 	}
 	if totalField := int64(binary.BigEndian.Uint64(data[8:16])); totalField != int64(total) {
-		return nil, fmt.Errorf("grib: %w (section 0 total length field is %d, message is %d bytes)",
+		return nil, fmt.Errorf("%w (section 0 total length field is %d, message is %d bytes)",
 			ErrBadSectionLength, totalField, total)
 	}
 	return secs, nil
@@ -200,7 +200,7 @@ func walkEnvelope(r io.ReaderAt, off, totalLen int64) (*envelopeIndex, error) {
 		if end-pos < 5 {
 			trailing := end - pos
 			if trailing > 4 && multiField {
-				return nil, fmt.Errorf("grib: %w (%d trailing bytes after last section)", ErrTruncated, trailing)
+				return nil, fmt.Errorf("%w (%d trailing bytes after last section)", ErrTruncated, trailing)
 			}
 			break // 第 8 节结束标记（或经典异常；由读取时的 parseSections 复查）/ section 8 end marker (or classic anomaly; parseSections re-checks at read time)
 		}
@@ -216,9 +216,9 @@ func walkEnvelope(r io.ReaderAt, off, totalLen int64) (*envelopeIndex, error) {
 		if slen < 5 || pos+slen > end {
 			if multiField {
 				if slen < 5 {
-					return nil, fmt.Errorf("grib: %w (section at offset %d claims length %d)", ErrBadSectionLength, pos, slen)
+					return nil, fmt.Errorf("%w (section at offset %d claims length %d)", ErrBadSectionLength, pos, slen)
 				}
-				return nil, fmt.Errorf("grib: %w (section at offset %d claims %d bytes, only %d left in message)",
+				return nil, fmt.Errorf("%w (section at offset %d claims %d bytes, only %d left in message)",
 					ErrBadSectionLength, pos, slen, end-pos)
 			}
 			break // 经典异常；读取时同样推迟并得到相同错误 / classic anomaly; deferred to read time there, which yields the same error
@@ -255,7 +255,7 @@ func walkEnvelope(r io.ReaderAt, off, totalLen int64) (*envelopeIndex, error) {
 		h++
 	}
 	if h == len(spans) {
-		return nil, fmt.Errorf("grib: %w (multi-field envelope has no data description section)", ErrTruncated)
+		return nil, fmt.Errorf("%w (multi-field envelope has no data description section)", ErrTruncated)
 	}
 	var groups [][]SectionRef
 	var cur []SectionRef
@@ -267,7 +267,7 @@ func walkEnvelope(r io.ReaderAt, off, totalLen int64) (*envelopeIndex, error) {
 		}
 	}
 	if len(cur) > 0 || len(groups) < 2 {
-		return nil, fmt.Errorf("grib: %w (multi-field envelope has an incomplete or single field group)", ErrTruncated)
+		return nil, fmt.Errorf("%w (multi-field envelope has an incomplete or single field group)", ErrTruncated)
 	}
 	for k := 1; k < len(groups); k++ {
 		if len(groups[k]) != len(groups[0]) {

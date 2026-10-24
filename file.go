@@ -92,7 +92,7 @@ func openReader(r io.ReaderAt, size int64, opts ...Option) (*File, error) {
 	}
 	f := &File{r: r, size: size, cfg: *cfg}
 	if size < 8 {
-		return nil, fmt.Errorf("grib: %w (%d bytes)", ErrTruncated, size)
+		return nil, fmt.Errorf("%w (%d bytes)", ErrTruncated, size)
 	}
 	var off int64
 	for off < size {
@@ -103,14 +103,14 @@ func openReader(r io.ReaderAt, size int64, opts ...Option) (*File, error) {
 		// first 8 bytes to get the edition, then read the rest per edition —
 		// the two header layouts are entirely different.
 		if size-off < 8 {
-			return nil, fmt.Errorf("grib: %w at offset %d (%d trailing bytes)", ErrTruncated, off, size-off)
+			return nil, fmt.Errorf("%w at offset %d (%d trailing bytes)", ErrTruncated, off, size-off)
 		}
 		var hdr [16]byte
 		if _, err := r.ReadAt(hdr[:8], off); err != nil {
 			return nil, fmt.Errorf("grib: read section 0 header at offset %d: %w", off, err)
 		}
 		if string(hdr[0:4]) != "GRIB" {
-			return nil, fmt.Errorf("grib: %w at offset %d (magic % X)", ErrNotGRIB2, off, hdr[0:4])
+			return nil, fmt.Errorf("%w at offset %d (magic % X)", ErrNotGRIB2, off, hdr[0:4])
 		}
 
 		edition := int(hdr[7])
@@ -126,10 +126,10 @@ func openReader(r io.ReaderAt, size int64, opts ...Option) (*File, error) {
 			// at 16 MB — a limit inherent to FM 92-IX.
 			totalLen = int64(uint32(hdr[4])<<16 | uint32(hdr[5])<<8 | uint32(hdr[6]))
 			if totalLen < 8 {
-				return nil, fmt.Errorf("grib: %w at offset %d (GRIB1 total length %d)", ErrBadSectionLength, off, totalLen)
+				return nil, fmt.Errorf("%w at offset %d (GRIB1 total length %d)", ErrBadSectionLength, off, totalLen)
 			}
 			if off+totalLen > size {
-				return nil, fmt.Errorf("grib: %w at offset %d (message needs %d bytes, only %d left)",
+				return nil, fmt.Errorf("%w at offset %d (message needs %d bytes, only %d left)",
 					ErrTruncated, off, totalLen, size-off)
 			}
 			// GRIB1 没有多字段信封：一条消息就是一个记录。
@@ -141,11 +141,11 @@ func openReader(r io.ReaderAt, size int64, opts ...Option) (*File, error) {
 			// GRIB2：落入下方 16 字节的第 0 节处理路径。
 			// GRIB2: fall through to the 16-byte section 0 path below.
 		default:
-			return nil, fmt.Errorf("grib: %w at offset %d (edition %d)", ErrUnsupportedEdition, off, edition)
+			return nil, fmt.Errorf("%w at offset %d (edition %d)", ErrUnsupportedEdition, off, edition)
 		}
 
 		if size-off < 16 {
-			return nil, fmt.Errorf("grib: %w at offset %d (%d trailing bytes)", ErrTruncated, off, size-off)
+			return nil, fmt.Errorf("%w at offset %d (%d trailing bytes)", ErrTruncated, off, size-off)
 		}
 		if _, err := r.ReadAt(hdr[:], off); err != nil {
 			return nil, fmt.Errorf("grib: read section 0 header at offset %d: %w", off, err)
@@ -157,10 +157,10 @@ func openReader(r io.ReaderAt, size int64, opts ...Option) (*File, error) {
 		// other half is zero).
 		totalLen = int64(binary.BigEndian.Uint64(hdr[8:16]))
 		if totalLen < 16 {
-			return nil, fmt.Errorf("grib: %w at offset %d (total length %d)", ErrBadSectionLength, off, totalLen)
+			return nil, fmt.Errorf("%w at offset %d (total length %d)", ErrBadSectionLength, off, totalLen)
 		}
 		if off+totalLen > size {
-			return nil, fmt.Errorf("grib: %w at offset %d (message needs %d bytes, only %d left)",
+			return nil, fmt.Errorf("%w at offset %d (message needs %d bytes, only %d left)",
 				ErrTruncated, off, totalLen, size-off)
 		}
 		// Classify the envelope's section layout. A classic single-field
@@ -169,7 +169,7 @@ func openReader(r io.ReaderAt, size int64, opts ...Option) (*File, error) {
 		// message per data-field group.
 		ei, err := walkEnvelope(r, off, totalLen)
 		if err != nil {
-			return nil, fmt.Errorf("grib: envelope at offset %d: %w", off, err)
+			return nil, fmt.Errorf("%w (envelope at offset %d)", err, off)
 		}
 		if ei == nil {
 			f.msgs = append(f.msgs, msgRef{off: off, length: int(totalLen), edition: 2, field: -1})
