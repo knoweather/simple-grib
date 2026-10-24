@@ -1,6 +1,7 @@
 // 命令 gribdump 是 GRIB2/GRIB1 文件的检视工具：默认打印消息元数据，
 // 并支持 -values N（前 N 个数据值）、-section n（逐字段 Walk 转储，带表名，
-// 可重复）、-json（机器可读输出）。
+// 可重复）、-json（机器可读输出）以及 -webp（导出模板 5.49152 的 WebP 图像
+// 载荷）。
 package main
 
 import (
@@ -12,6 +13,7 @@ import (
 	"fmt"
 	"math"
 	"os"
+	"path/filepath"
 	"strconv"
 	"time"
 
@@ -28,10 +30,12 @@ func main() {
 		nValues  int
 		jsonOut  bool
 		sections sectionFlag
+		webpOut  string
 	)
 	flag.IntVar(&nValues, "values", 0, "print the first N data values of each message (0 = off)")
 	flag.BoolVar(&jsonOut, "json", false, "JSON output")
 	flag.Var(&sections, "section", "dump section n field by field with table names (repeatable; valid: 0-7)")
+	flag.StringVar(&webpOut, "webp", "", "write the WebP image payload to this file (one-message input) or directory (multi-message input)")
 	flag.Usage = func() {
 		fmt.Fprintln(os.Stderr, "usage: gribdump [flags] file...")
 		fmt.Fprintln(os.Stderr, "Flags:")
@@ -45,7 +49,7 @@ func main() {
 
 	exit := 0
 	for _, path := range flag.Args() {
-		if err := dumpFile(path, nValues, jsonOut, sections); err != nil {
+		if err := dumpFile(path, nValues, jsonOut, sections, webpOut); err != nil {
 			fmt.Fprintf(os.Stderr, "gribdump: %s: %v\n", path, err)
 			exit = 1
 		}
@@ -113,7 +117,7 @@ func nonFiniteName(f float64) string {
 // 文件 / 消息层级
 // ---------------------------------------------------------------------------
 
-func dumpFile(path string, nValues int, jsonOut bool, sections []int) error {
+func dumpFile(path string, nValues int, jsonOut bool, sections []int, webpOut string) error {
 	f, err := grib.Open(path)
 	if err != nil {
 		return err
@@ -123,6 +127,12 @@ func dumpFile(path string, nValues int, jsonOut bool, sections []int) error {
 	n, err := f.NumMessages()
 	if err != nil {
 		return err
+	}
+
+	if webpOut != "" {
+		if err := extractWebP(f, n, webpOut); err != nil {
+			return err
+		}
 	}
 
 	type fileOut struct {
@@ -157,6 +167,65 @@ func dumpFile(path string, nValues int, jsonOut bool, sections []int) error {
 	for _, h := range human {
 		fmt.Println(h)
 	}
+	return nil
+}
+
+// extractWebP 把 WebP 图像消息的载荷写成文件。-webp 的目标在单消息输入时
+// 是文件名，在多消息输入时是目录（每个消息写成 msgNNN.webp）；非 WebP 消息
+// 被跳过并提示，一个 WebP 都没找到则报错。
+//
+// extractWebP writes the payload of WebP image messages to disk. With a
+// single-message input the -webp argument is a file name; with several
+// messages it is a directory (msgNNN.webp per message). Non-WebP messages are
+// skipped with a note; finding none is an error.
+func extractWebP(f *grib.File, n int, dest string) error {
+	if n == 0 {
+		return fmt.Errorf("-webp: input has no messages")
+	}
+	if n == 1 {
+		m, err := f.Message(0)
+		if err != nil {
+			return fmt.Errorf("message 0: %w", err)
+		}
+		raw, err := m.WebP()
+		if err != nil {
+			return fmt.Errorf("message 0: %w", err)
+		}
+		if err := os.WriteFile(dest, raw, 0o644); err != nil {
+			return err
+		}
+		fmt.Fprintf(os.Stderr, "gribdump: wrote %s (%d bytes)\n", dest, len(raw))
+		return nil
+	}
+
+	written := 0
+	dirReady := false
+	for i := 0; i < n; i++ {
+		m, err := f.Message(i)
+		if err != nil {
+			return fmt.Errorf("message %d: %w", i, err)
+		}
+		raw, err := m.WebP()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "gribdump: message %d: %v (skipped)\n", i, err)
+			continue
+		}
+		if !dirReady {
+			if err := os.MkdirAll(dest, 0o755); err != nil {
+				return fmt.Errorf("-webp directory %s: %w", dest, err)
+			}
+			dirReady = true
+		}
+		name := filepath.Join(dest, fmt.Sprintf("msg%03d.webp", i))
+		if err := os.WriteFile(name, raw, 0o644); err != nil {
+			return err
+		}
+		written++
+	}
+	if written == 0 {
+		return fmt.Errorf("-webp: no WebP image messages found")
+	}
+	fmt.Fprintf(os.Stderr, "gribdump: wrote %d WebP image(s) to %s\n", written, dest)
 	return nil
 }
 
