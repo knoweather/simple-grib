@@ -220,10 +220,10 @@ func (m *Message) checkValueCount(numValues int) error {
 
 // checkPayloadSize validates the section 7 data length against the data
 // representation template. Supported: template 5.0 simple packing, 5.4 IEEE
-// precision=1, and the local-use WebP image template 5.49152 (section 7 is a
-// complete WebP file and numberOfValues is the pixel count). Section 5 is
-// bounds-checked against each template's fixed header, so a truncated section
-// is rejected here instead of indexing out of range.
+// precision=1, the 5.41 PNG and local-use WebP image templates (section 7 is a
+// complete image file). Section 5 is bounds-checked against each template's
+// fixed header, so a truncated section is rejected here instead of indexing
+// out of range.
 func (m *Message) checkPayloadSize(numValues int) error {
 	tmplNo := int(binary.BigEndian.Uint16(m.sec5[9:11])) // octets 10-11
 	switch tmplNo {
@@ -252,13 +252,18 @@ func (m *Message) checkPayloadSize(numValues int) error {
 			return fmt.Errorf("gribw: section 7 has %d bytes, IEEE precision 1 with %d values needs %d",
 				len(m.payload), numValues, want)
 		}
+	case pack.TemplatePNG:
+		// 图像载荷：第 7 段是完整 PNG，numberOfValues 是灰度样本数。
+		// Image payload: section 7 is a complete PNG and numberOfValues is the
+		// number of grayscale samples.
+		return checkPNGPayload(numValues, m.payload)
 	case pack.TemplateWebP:
 		// 图像载荷：第 7 段是完整 WebP 文件，numberOfValues 是像素数。
 		// Image payload: section 7 is a complete WebP file and numberOfValues
 		// is the pixel count.
 		return checkWebPPayload(numValues, m.payload)
 	default:
-		return fmt.Errorf("gribw: payload size verification for data representation template %d not implemented (supported: 0 simple packing, 4 IEEE precision=1, 49152 WebP image)", tmplNo)
+		return fmt.Errorf("gribw: payload size verification for data representation template %d not implemented (supported: 0 simple packing, 4 IEEE precision=1, 41 PNG, 49152 WebP image)", tmplNo)
 	}
 	return nil
 }

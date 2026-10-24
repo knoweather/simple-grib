@@ -80,8 +80,8 @@ func TestP6B_ErrUnsupported_UnregisteredTemplates(t *testing.T) {
 		tmpl int // WMO specdata name for the report
 	}{
 		{"5.1 matrix values (Experimental)", 1},
-		{"5.41 PNG", 41},
 		{"5.50 spectral coefficients", 50},
+		{"5.200 run-length packing", 200},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

@@ -90,6 +90,7 @@ func init() {
 	Register(TemplateComplexPlain, complexPlainUnpacker{})
 	Register(TemplateCCSDS, ccsdsUnpacker{})
 	Register(TemplateJPEG2000, jpcUnpacker{})
+	Register(TemplatePNG, pngUnpacker{})
 	// Template 49152 (WebP) registers its local-use section 5 layout and its
 	// refusing unpacker in webp.go's init.
 }
