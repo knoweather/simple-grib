@@ -19,7 +19,9 @@
 <p align="center"><strong>English</strong> | <a href="./README.zh-CN.md">简体中文</a></p>
 
 Pure-Go **GRIB edition 1 + 2** reader/writer — zero cgo, no eccodes, no C
-toolchain — the module depends on nothing but the standard library. Metadata
+toolchain. The only non-standard-library module is the pure-Go
+[`simple-webp`](https://github.com/knoweather/simple-webp) decoder behind the
+local-use WebP template. Metadata
 tracks ecCodes key by key, decoded values are bit-exact, and the same code builds
 to WebAssembly.
 
@@ -85,11 +87,11 @@ like ecCodes' `codetable_title`; `grib1.RegisterTable2` still overrides it.
 | **GRIB1 decoding**: five-section parse + values (native float64) + coordinates; mixable with GRIB2 | ✅ |
 | Metadata: Identification / Product (with WMO code-table names), `Walk` generic template walker (one parser for all 254 templates) | ✅ |
 | Grid coordinates: 3.0/3.1/3.2/3.3 (+rotated), 3.40/3.41 Gaussian, **3.20 polar stereographic / 3.30 Lambert conformal point-by-point** | ✅ |
-| Data decoding: 5.0 simple (any bit width), 5.2 complex, 5.3 complex+spatial differencing, 5.4 IEEE binary32, **5.40 JPEG 2000 (pure-Go JPC decoder)**, 5.42 CCSDS AEC (own codec) | ✅ |
+| Data decoding: 5.0 simple (any bit width), 5.2 complex, 5.3 complex+spatial differencing, 5.4 IEEE binary32, **5.40 JPEG 2000 (pure-Go JPC decoder)**, 5.42 CCSDS AEC (own codec); 5.49152 carries a WebP image payload (local use, stored verbatim; header/decode via `simple-webp`) | ✅ |
 | Bitmap (section 6, indicator 0/255) + declared point count cross-check | ✅ |
-| Writers: `gribw` templates 5.0 / 5.4 with round-trip tests; local table registration | ✅ |
+| Writers: `gribw` templates 5.0 / 5.4 with round-trip tests, plus 5.49152 WebP images via `SetWebP`; local table registration | ✅ |
 | Writer `gribw1`: GRIB1 encoding (simple packing, grid types 0/4 + bitmap + constant fields) | ✅ |
-| CLI `gribdump`: metadata / values / field-by-field `Walk` / JSON | ✅ |
+| CLI `gribdump`: metadata / values / field-by-field `Walk` / JSON / WebP image export | ✅ |
 | **WASM** `wasm/`: decode GRIB1 + GRIB2 directly in the browser / Node; metadata + values + coordinates as TypedArrays, drag-and-drop viewer included | ✅ |
 
 ## Install
@@ -108,6 +110,7 @@ go run ./cmd/gribdump sample.grib2 # per-message metadata (with code-table names
 go run ./cmd/gribdump -values 16 sample.grib2 # first 16 decoded values
 go run ./cmd/gribdump -section 3 -section 5 sample.grib2 # field-by-field Walk
 go run ./cmd/gribdump -json sample.grib2 # machine readable
+go run ./cmd/gribdump -webp satellite.webp sample.grib2 # extract a WebP image payload
 ```
 
 ## Examples
@@ -183,6 +186,30 @@ _ = msg.SetProduct(prod) // *grib.Product
 sec5, payload, _ := gribw.EncodeSimple(vals, gribw.SimpleParams{R: 0, E: 4, D: 1, Bits: 10})
 _ = msg.SetDataSection(sec5, payload)
 data, _ := gribw.File(msg) // complete GRIB2 byte stream (variadic: multiple messages)
+```
+
+### WebP image payload (local use)
+
+GRIB can also carry an image product: template `5.49152` stores a complete WebP
+file verbatim — the library neither decodes pixels on write nor re-encodes
+values into an image. `Values()` reports `pack.ErrNotNumeric` for such messages;
+use the image accessors instead.
+
+```go
+webp, _ := os.ReadFile("satellite.webp")
+
+msg := gribw.New()
+_ = msg.SetDiscipline(0)
+_ = msg.SetIdentification(id)
+_ = msg.SetGrid(g)
+_ = msg.SetProduct(prod)
+_ = msg.SetWebP(webp)   // section 5 = 11-byte header, section 7 = the file verbatim
+data, _ := gribw.File(msg)
+
+m, _ := fl.Message(0)   // reader side
+raw, _ := m.WebP()      // identical bytes back
+info, _ := m.WebPInfo() // {Width, Height, Lossless, Animated}; header only
+img, _ := m.WebPImage() // decoded image.Image (first frame if animated)
 ```
 
 ## WASM (browser / Node)
@@ -322,15 +349,18 @@ L1 wire format File (io.ReaderAt + message index) → Message (whole-message buf
 - JPEG 2000 5.40: reversible 5/3 transform, LRCP order, one layer and one
  component only; irreversible 9/7, multi-layer / multi-component codestreams
  and COC/QCC/RGN/POC/PPM/PPT/SOP/EPH markers → `pack.ErrJPCUnsupported`
-- Local-use template 49152 (WebP) is a registered placeholder: decoding
- returns `pack.ErrDecoderNotConfigured` until a decoder is installed with
- `pack.Register`
+- Local-use template 49152 (WebP) is an opaque image payload: stored and
+ returned byte-for-byte by `SetWebP`/`WebP`, and `Values` reports
+ `pack.ErrNotNumeric`. Lossy and animated files are accepted (`WebPImage`
+ returns the first frame for animations); the image size need not match the
+ grid, because `numberOfValues` records the pixel count
 - IEEE 5.4 only precision=1 (binary32); 64/128-bit → fail-loud
 - Bitmap indicator 1–254 (centre-defined) → fail-loud
 - Grids: remaining projection templates (3.10/3.12/3.31…) and stretched
  Gaussian (3.42/3.43) are metadata-only; `Point/Lats/Lons` →
  `grid.ErrNotImplemented`
-- Writers currently support 5.0 / 5.4(precision=1) (GRIB2) and **`gribw1`:
+- Writers currently support 5.0 / 5.4(precision=1) (GRIB2), the local-use
+ 5.49152 WebP image payload (`SetWebP`), and **`gribw1`:
  GRIB1 simple packing** (grid types 0/4, bitmap, constant fields;
  round-trip verified against real files); BUFR is only recognised and
  rejected

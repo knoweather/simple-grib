@@ -30,8 +30,7 @@ jobs:
           # Pinned: grid_t30_baseline_test.go and grid_c38_e2e_test.go compare
           # bit-exact float64 digests that were anchored on go1.27.1. A different
           # patch release can change the last bits of math.Tan/math.Pow, so the
-          # toolchain has to match the anchors (go.mod also pins
-          # `toolchain go1.27.1`).
+          # toolchain has to match the anchors (go.mod also requires 1.27.1).
           go-version: "1.27.1"
           cache: true
           cache-dependency-path: go.mod

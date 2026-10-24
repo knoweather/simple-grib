@@ -19,7 +19,7 @@
 <p align="center"><a href="./README.md">English</a> | <strong>简体中文</strong></p>
 
 纯 Go 的 **GRIB edition 1 + 2** 读写库 —— 零 cgo、不需要 eccodes、不需要 C 工具链。
-依赖只有标准库。元数据逐键对齐 ecCodes，数值逐位一致，同一份代码还能编译成 WebAssembly。
+唯一非标准库依赖是 local-use WebP 模板背后的纯 Go [`simple-webp`](https://github.com/knoweather/simple-webp) 解码器。元数据逐键对齐 ecCodes，数值逐位一致，同一份代码还能编译成 WebAssembly。
 
 ```go
 f, err := grib.Open("icon.grib2")
@@ -68,11 +68,11 @@ for m, err := range f.Messages() {
 | **GRIB1 解码**：五段解析 + 数值（float64 原生精度）+ 坐标；与 GRIB2 可混装 | ✅ |
 | 元数据：Identification / Product（含 WMO 码表名）、`Walk` 通用模板遍历器（254 模板一个解析器） | ✅ |
 | 网格坐标：3.0/3.1/3.2/3.3（+rotated）、3.40/3.41 Gaussian、**3.20 polar stereographic / 3.30 Lambert conformal 逐点坐标** | ✅ |
-| 数据解码：5.0 simple（任意位宽位流）、5.2 complex、5.3 complex+spatial differencing、5.4 IEEE binary32、**5.40 JPEG 2000（纯 Go JPC 解码器）**、5.42 CCSDS AEC（自研 codec） | ✅ |
+| 数据解码：5.0 simple（任意位宽位流）、5.2 complex、5.3 complex+spatial differencing、5.4 IEEE binary32、**5.40 JPEG 2000（纯 Go JPC 解码器）**、5.42 CCSDS AEC（自研 codec）；5.49152 承载 WebP 图像载荷（local-use，原样存储；头解析/解码经 `simple-webp`） | ✅ |
 | bitmap（section 6，indicator 0/255）+ 声明点数交叉校验 | ✅ |
-| writer `gribw`：模板驱动编码 5.0 / 5.4，round-trip 测试；local 表注册 | ✅ |
+| writer `gribw`：模板驱动编码 5.0 / 5.4，round-trip 测试；5.49152 经 `SetWebP` 写入 WebP 图像；local 表注册 | ✅ |
 | writer `gribw1`：GRIB1 编码（简单打包，类型 0/4 网格 + 位图 + 常量场） | ✅ |
-| CLI `gribdump`：元数据 / 数值 / 逐字段 Walk / JSON | ✅ |
+| CLI `gribdump`：元数据 / 数值 / 逐字段 Walk / JSON / WebP 图像导出 | ✅ |
 | **WASM** `wasm/`：浏览器 / Node 里直接解码（GRIB1 + GRIB2），元数据 + 数值 + 坐标以 TypedArray 出参；含拖拽即用的查看器 | ✅ |
 
 ## 安装
@@ -91,6 +91,7 @@ go run ./cmd/gribdump sample.grib2 # 每条消息的元数据（带码表名）
 go run ./cmd/gribdump -values 16 sample.grib2 # 前 16 个解码值
 go run ./cmd/gribdump -section 3 -section 5 sample.grib2 # Walk 逐字段
 go run ./cmd/gribdump -json sample.grib2 # 机器可读
+go run ./cmd/gribdump -webp satellite.webp sample.grib2 # 导出 WebP 图像载荷
 ```
 
 ## 示例
@@ -166,6 +167,27 @@ _ = msg.SetProduct(prod) // *grib.Product
 sec5, payload, _ := gribw.EncodeSimple(vals, gribw.SimpleParams{R: 0, E: 4, D: 1, Bits: 10})
 _ = msg.SetDataSection(sec5, payload)
 data, _ := gribw.File(msg) // 完整 GRIB2 字节流（可变参支持多消息）
+```
+
+### WebP 图像载荷（local use）
+
+GRIB 也能作为图像产品的容器：模板 `5.49152` 原样保存一整份 WebP 文件——库既不在写入时解析像素，也不把数值重编码成图像。这类消息的 `Values()` 返回 `pack.ErrNotNumeric`，请改用图像访问器。
+
+```go
+webp, _ := os.ReadFile("satellite.webp")
+
+msg := gribw.New()
+_ = msg.SetDiscipline(0)
+_ = msg.SetIdentification(id)
+_ = msg.SetGrid(g)
+_ = msg.SetProduct(prod)
+_ = msg.SetWebP(webp)   // 第 5 段 = 11 字节固定头，第 7 段 = 文件原字节
+data, _ := gribw.File(msg)
+
+m, _ := fl.Message(0)   // reader 侧
+raw, _ := m.WebP()      // 原样取回
+info, _ := m.WebPInfo() // {Width, Height, Lossless, Animated}，只读头
+img, _ := m.WebPImage() // 解码后的 image.Image（动画取首帧）
 ```
 
 ## WASM（浏览器 / Node）
@@ -255,11 +277,11 @@ L1 线格式层 File（io.ReaderAt + 消息索引）→ Message（整条缓冲�
 
 - 数据模板 5.1 / 5.41 PNG / 5.5x spectral / 5.200 run-length → `pack.ErrUnsupported` fail-loud
 - JPEG 2000 5.40：仅支持可逆 5/3 变换、LRCP、单层、单分量；不可逆 9/7、多层/多分量码流，以及 COC/QCC/RGN/POC/PPM/PPT/SOP/EPH marker 段 → `pack.ErrJPCUnsupported`
-- local-use 模板 49152（WebP）为已注册占位：需先用 `pack.Register` 安装解码器，否则解码返回 `pack.ErrDecoderNotConfigured`
+- local-use 模板 49152（WebP）是**不透明的图像载荷**：`SetWebP`/`WebP` 原字节存取，`Values` 返回 `pack.ErrNotNumeric`；有损、动画都接受（动画由 `WebPImage` 取首帧）；图像尺寸不必等于网格点数——`numberOfValues` 记录的是像素数
 - IEEE 5.4 仅 precision=1（binary32）；64/128-bit → fail-loud
 - bitmap indicator 1–254（中心预定）→ fail-loud
 - 网格：其余投影类（3.10/3.12/3.31…）与 stretched Gaussian（3.42/3.43）为 metadata-only，`Point/Lats/Lons` → `grid.ErrNotImplemented`
-- writer 现支持 5.0 / 5.4(precision=1)（GRIB2）与 **`gribw1`：GRIB1 简单打包编码**（类型 0/4 网格、位图、常量场；round-trip 对拍真实文件通过）；BUFR 仅识别并报错
+- writer 现支持 5.0 / 5.4(precision=1)（GRIB2）、local-use 5.49152 WebP 图像载荷（`SetWebP`）与 **`gribw1`：GRIB1 简单打包编码**（类型 0/4 网格、位图、常量场；round-trip 对拍真实文件通过）；BUFR 仅识别并报错
 
 ## 文档索引
 
