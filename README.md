@@ -220,7 +220,7 @@ grids draw a raster, projected grids draw a scatter with hover readouts),
 first 200 rows as a value table, plus CSV / PNG / metadata JSON export.
 
 **Measured compatibility**: `GOOS=js GOARCH=wasm go build ./...` passes clean
-on 11/11 packages; tests of `spec` / `grid` / `gribw` / `internal/octetio` /
+for every package; tests of `spec` / `grid` / `gribw` / `internal/octetio` /
 `probe` / `cmd/gribdump` / `wasm` all pass under Node. The few failures are
 unrelated to library logic: js/wasm under a **Windows host** cannot read
 directories (Linux hosts can), tests that spawn `go build` subprocesses, and
@@ -319,6 +319,12 @@ L1 wire format File (io.ReaderAt + message index) → Message (whole-message buf
 
 - Data templates 5.1 / 5.41 PNG / 5.5x spectral / 5.200 run-length →
  `pack.ErrUnsupported` (fail-loud)
+- JPEG 2000 5.40: reversible 5/3 transform, LRCP order, one layer and one
+ component only; irreversible 9/7, multi-layer / multi-component codestreams
+ and COC/QCC/RGN/POC/PPM/PPT/SOP/EPH markers → `pack.ErrJPCUnsupported`
+- Local-use template 49152 (WebP) is a registered placeholder: decoding
+ returns `pack.ErrDecoderNotConfigured` until a decoder is installed with
+ `pack.Register`
 - IEEE 5.4 only precision=1 (binary32); 64/128-bit → fail-loud
 - Bitmap indicator 1–254 (centre-defined) → fail-loud
 - Grids: remaining projection templates (3.10/3.12/3.31…) and stretched

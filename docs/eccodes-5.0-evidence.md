@@ -1,4 +1,4 @@
-# eccodes 源码取证（ / ）—— ，2026-10-04
+# eccodes 源码取证（模板 5.0 / 高斯网格 / scan mode）—— 2026-10-04
 
 来源：`ecmwf/eccodes`（原 `ecmwf/codes` 已改名），develop 分支，2026-10-04 从 the Linux bench host 抓取。
 注意：仓库结构已大改（libcodes → src/eccodes/accessor + geo/iterator）。

@@ -196,7 +196,7 @@ res.messages[0].grid.lats; // Float64Array（perPoint 时与 values 同序）
 
 `wasm/viewer.html` 是个现成的单文件查看器：**拖入 `.grib2` 就出结果** —— 消息列表、identification/product/grid 元数据（码表名由 Go 侧查好）、数值场渲染（规则网格画栅格、投影网格自动改画散点，含悬停读数）、前 200 行数值表，还能导出 CSV / PNG / 元数据 JSON。
 
-**实测兼容性**：`GOOS=js GOARCH=wasm go build ./...` 11/11 包干净通过；`spec` / `grid` / `gribw` /
+**实测兼容性**：`GOOS=js GOARCH=wasm go build ./...` 所有包干净通过；`spec` / `grid` / `gribw` /
 `internal/octetio` / `probe` / `cmd/gribdump` / `wasm` 的测试在 Node 下全绿。少数失败与库逻辑无关：
 js/wasm 在 **Windows 宿主**下不支持读目录（Linux 宿主可以）、测试内部起 `go build` 子进程、
 以及**跨架构位级浮点差异**（amd64 `GOAMD64=v3` 的 FMA 融合 + `math.Exp/Pow` 的 amd64 汇编实现，
@@ -254,6 +254,8 @@ L1 线格式层 File（io.ReaderAt + 消息索引）→ Message（整条缓冲�
 ## 已知限制
 
 - 数据模板 5.1 / 5.41 PNG / 5.5x spectral / 5.200 run-length → `pack.ErrUnsupported` fail-loud
+- JPEG 2000 5.40：仅支持可逆 5/3 变换、LRCP、单层、单分量；不可逆 9/7、多层/多分量码流，以及 COC/QCC/RGN/POC/PPM/PPT/SOP/EPH marker 段 → `pack.ErrJPCUnsupported`
+- local-use 模板 49152（WebP）为已注册占位：需先用 `pack.Register` 安装解码器，否则解码返回 `pack.ErrDecoderNotConfigured`
 - IEEE 5.4 仅 precision=1（binary32）；64/128-bit → fail-loud
 - bitmap indicator 1–254（中心预定）→ fail-loud
 - 网格：其余投影类（3.10/3.12/3.31…）与 stretched Gaussian（3.42/3.43）为 metadata-only，`Point/Lats/Lons` → `grid.ErrNotImplemented`
