@@ -166,13 +166,23 @@ func pngChunk(typ string, data []byte) []byte {
 	return append(out, sum[:]...)
 }
 
-// checkPNGPayload validates section 7 for template 5.41: a complete PNG whose
-// canvas holds at least numberOfValues grayscale samples. The reader enforces
-// the rest (grayscale, bit depth equal to bitsPerValue, sample extraction).
+// checkPNGPayload validates section 7 for template 5.41: a complete grayscale
+// PNG whose bit depth equals bitsPerValue and whose canvas holds at least
+// numberOfValues samples. Sample extraction is the reader's job.
 //
-// checkPNGPayload 校验模板 5.41 的第 7 段：一份完整 PNG，画布至少能容纳
-// numberOfValues 个灰度样本；灰度/位深/取样由读取端继续校验。
-func checkPNGPayload(numValues int, payload []byte) error {
+// checkPNGPayload 校验模板 5.41 的第 7 段：完整灰度 PNG，位深等于
+// bitsPerValue，画布至少能容纳 numberOfValues 个样本；取样由读取端负责。
+func checkPNGPayload(numValues, bits int, payload []byte) error {
+	const signature = "\x89PNG\r\n\x1a\n"
+	if len(payload) < 33 || string(payload[:8]) != signature || string(payload[12:16]) != "IHDR" {
+		return fmt.Errorf("gribw: section 7 PNG payload: missing signature or IHDR")
+	}
+	if color := payload[25]; color != 0 {
+		return fmt.Errorf("gribw: section 7 PNG color type %d; WMO 5.41 requires grayscale", color)
+	}
+	if depth := int(payload[24]); depth != bits {
+		return fmt.Errorf("gribw: section 5 bitsPerValue %d != PNG bit depth %d", bits, depth)
+	}
 	cfg, err := png.DecodeConfig(bytes.NewReader(payload))
 	if err != nil {
 		return fmt.Errorf("gribw: section 7 PNG payload: %w", err)

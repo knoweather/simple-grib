@@ -7,6 +7,7 @@ import (
 	"errors"
 	"hash/crc32"
 	"image"
+	"image/color"
 	"image/png"
 	"math"
 	"strings"
@@ -272,5 +273,57 @@ func TestPNGRejectsBitsAbove16(t *testing.T) {
 	}
 	if bad.Template != TemplatePNG || bad.Field != "bitsPerValue" {
 		t.Errorf("got {%d, %q}, want {%d, bitsPerValue}", bad.Template, bad.Field, TemplatePNG)
+	}
+}
+
+func TestPNGPaddingIgnored(t *testing.T) {
+	// A 2x2 image (4 samples) with numberOfValues = 3: only the first three
+	// samples belong to the field.
+	sec5 := pngSec5(t, 3, 0, 0, 0, 8, 0)
+	got, err := Unpack(&Context{
+		TemplateNumber: TemplatePNG,
+		Fields:         pngWalk(t, sec5),
+		Data:           encodeGray8(t, 2, 2, []uint8{1, 2, 3, 4}),
+		NumValues:      3,
+	})
+	if err != nil {
+		t.Fatalf("Unpack: %v", err)
+	}
+	for i, want := range []uint8{1, 2, 3} {
+		if got[i] != float32(want) {
+			t.Errorf("value[%d] = %v, want %v", i, got[i], want)
+		}
+	}
+}
+
+func TestPNGRejectsZeroValues(t *testing.T) {
+	sec5 := pngSec5(t, 0, 0, 0, 0, 8, 0)
+	_, err := Unpack(&Context{
+		TemplateNumber: TemplatePNG,
+		Fields:         pngWalk(t, sec5),
+		Data:           encodeGray8(t, 1, 1, []uint8{1}),
+		NumValues:      0,
+	})
+	if err == nil || !strings.Contains(err.Error(), "numberOfValues 0") {
+		t.Fatalf("err = %v, want a numberOfValues-0 rejection", err)
+	}
+}
+
+func TestPNGRejectsPalette(t *testing.T) {
+	pal := color.Palette{color.Gray{Y: 0}, color.Gray{Y: 255}}
+	img := image.NewPaletted(image.Rect(0, 0, 2, 2), pal)
+	var buf bytes.Buffer
+	if err := png.Encode(&buf, img); err != nil {
+		t.Fatalf("png.Encode: %v", err)
+	}
+	sec5 := pngSec5(t, 4, 0, 0, 0, 8, 0)
+	_, err := Unpack(&Context{
+		TemplateNumber: TemplatePNG,
+		Fields:         pngWalk(t, sec5),
+		Data:           buf.Bytes(),
+		NumValues:      4,
+	})
+	if err == nil || !strings.Contains(err.Error(), "color type 3") {
+		t.Fatalf("err = %v, want a palette/color-type rejection", err)
 	}
 }

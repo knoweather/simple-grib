@@ -66,6 +66,9 @@ func (pngUnpacker) Unpack(ctx *Context) ([]float32, error) {
 		}
 		return simpleDecode(p, nil, ctx.NumValues)
 	}
+	if ctx.NumValues <= 0 {
+		return nil, fmt.Errorf("pack: template %d: bitsPerValue %d with numberOfValues %d", TemplatePNG, p.Bits, ctx.NumValues)
+	}
 
 	width, height, depth, err := pngHeader(ctx.Data)
 	if err != nil {
@@ -126,6 +129,9 @@ func pngHeader(data []byte) (width, height, depth int, err error) {
 	if data[26] != 0 || data[27] != 0 {
 		return 0, 0, 0, fmt.Errorf("PNG compression/filter method %d/%d; only 0/0 is defined", data[26], data[27])
 	}
+	if data[28] > 1 {
+		return 0, 0, 0, fmt.Errorf("PNG interlace method %d; only 0 (none) and 1 (Adam7) are defined", data[28])
+	}
 	switch depth {
 	case 1, 2, 4, 8, 16:
 	default:
@@ -153,7 +159,14 @@ func pngSamples(img image.Image, depth, numValues int) ([]uint32, error) {
 		for y := b.Min.Y; y < b.Max.Y && len(out) < numValues; y++ {
 			row := m.Pix[(y-b.Min.Y)*m.Stride:]
 			for x := 0; x < b.Dx() && len(out) < numValues; x++ {
-				out = append(out, uint32(row[x])/scale)
+				v := uint32(row[x])
+				if v%scale != 0 {
+					// The standard library scales sub-byte samples by exactly
+					// 255/(2^d-1); anything else would mean a decoder change we
+					// cannot invert, so refuse rather than round silently.
+					return nil, fmt.Errorf("grayscale byte %d is not a multiple of the depth-%d scale %d", v, depth, scale)
+				}
+				out = append(out, v/scale)
 			}
 		}
 	case *image.Gray16:

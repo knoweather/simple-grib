@@ -221,3 +221,63 @@ func TestPNGWriterRejectsRawOutOfRange(t *testing.T) {
 		t.Error("+Inf accepted; want fail-loud")
 	}
 }
+
+// buildRawPNGMessage installs a caller-supplied section 5 + payload and builds
+// the message; it returns the Build error instead of failing the test so the
+// negative cases can assert on it.
+func buildRawPNGMessage(t *testing.T, sec5, payload []byte) ([]byte, error) {
+	t.Helper()
+	fl, err := grib.Open("testdata/gribw-xcheck/t20_grid_3x3.grib2")
+	if err != nil {
+		t.Fatalf("open fixture: %v", err)
+	}
+	defer fl.Close()
+	m, _ := fl.Message(0)
+	g, _ := m.Grid()
+	id, _ := m.Identification()
+	p, _ := m.Product()
+	msg := gribw.New()
+	_ = msg.SetDiscipline(m.Discipline())
+	_ = msg.SetIdentification(id)
+	_ = msg.SetGrid(g)
+	_ = msg.SetProduct(p)
+	if err := msg.SetDataSection(sec5, payload); err != nil {
+		t.Fatalf("SetDataSection: %v", err)
+	}
+	return gribw.File(msg)
+}
+
+func TestPNGWriterRejectsColourPayload(t *testing.T) {
+	sec5, _, err := gribw.EncodePNG(make([]float32, 9), gribw.SimpleParams{Bits: 8})
+	if err != nil {
+		t.Fatalf("EncodePNG: %v", err)
+	}
+	img := image.NewNRGBA(image.Rect(0, 0, 3, 3))
+	for i := 0; i < len(img.Pix); i += 4 {
+		img.Pix[i+3] = 0xFF
+	}
+	var buf bytes.Buffer
+	if err := png.Encode(&buf, img); err != nil {
+		t.Fatalf("png.Encode: %v", err)
+	}
+	_, err = buildRawPNGMessage(t, sec5, buf.Bytes())
+	if err == nil || !strings.Contains(err.Error(), "grayscale") {
+		t.Fatalf("Build error = %v, want a grayscale rejection", err)
+	}
+}
+
+func TestPNGWriterRejectsBitDepthMismatch(t *testing.T) {
+	vals := make([]float32, 9)
+	sec5, _, err := gribw.EncodePNG(vals, gribw.SimpleParams{Bits: 16})
+	if err != nil {
+		t.Fatalf("EncodePNG(16): %v", err)
+	}
+	_, payload8, err := gribw.EncodePNG(vals, gribw.SimpleParams{Bits: 8})
+	if err != nil {
+		t.Fatalf("EncodePNG(8): %v", err)
+	}
+	_, err = buildRawPNGMessage(t, sec5, payload8)
+	if err == nil || !strings.Contains(err.Error(), "PNG bit depth") {
+		t.Fatalf("Build error = %v, want a bit-depth mismatch", err)
+	}
+}

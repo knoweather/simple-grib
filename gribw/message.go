@@ -256,7 +256,10 @@ func (m *Message) checkPayloadSize(numValues int) error {
 		// 图像载荷：第 7 段是完整 PNG，numberOfValues 是灰度样本数。
 		// Image payload: section 7 is a complete PNG and numberOfValues is the
 		// number of grayscale samples.
-		return checkPNGPayload(numValues, m.payload)
+		if len(m.sec5) < 21 {
+			return fmt.Errorf("gribw: section 5 template 5.41 needs at least 21 bytes (R/E/D/bits/type), section has %d", len(m.sec5))
+		}
+		return checkPNGPayload(numValues, int(m.sec5[19]), m.payload)
 	case pack.TemplateWebP:
 		// 图像载荷：第 7 段是完整 WebP 文件，numberOfValues 是像素数。
 		// Image payload: section 7 is a complete WebP file and numberOfValues
