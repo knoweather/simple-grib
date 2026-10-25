@@ -122,3 +122,45 @@ func TestPNGInterlacedFixtures(t *testing.T) {
 		})
 	}
 }
+
+// TestPNGSimplePngFixtures decodes PNGs written by the sister library
+// simple-png (v1.4.0): 8-bit, Adam7-interlaced 8-bit and 16-bit. It keeps the
+// fixture-based cross-check in CI without adding simple-png as a module
+// dependency of simple-grib.
+func TestPNGSimplePngFixtures(t *testing.T) {
+	def, ok := spec.Template(5, TemplatePNG)
+	if !ok {
+		t.Fatal("no spec definition for template 5.41")
+	}
+	for _, tc := range []struct {
+		name  string
+		depth int
+	}{
+		{"simplepng8", 8},
+		{"simplepng8i", 8},
+		{"simplepng16", 16},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			pngData, samples := loadPNGNamed(t, tc.name)
+			sec5 := pngSec5(t, len(samples), 0, 0, 0, uint8(tc.depth), 0)
+			w, err := spec.NewWalk(def, sec5)
+			if err != nil {
+				t.Fatalf("NewWalk: %v", err)
+			}
+			got, err := Unpack(&Context{
+				TemplateNumber: TemplatePNG,
+				Fields:         w,
+				Data:           pngData,
+				NumValues:      len(samples),
+			})
+			if err != nil {
+				t.Fatalf("Unpack: %v", err)
+			}
+			for i, want := range samples {
+				if got[i] != float32(want) {
+					t.Errorf("value[%d] = %v, want %v", i, got[i], want)
+				}
+			}
+		})
+	}
+}
