@@ -176,7 +176,7 @@ func (t *jpcTileDecoder) buildGeometry() error {
 				// band and compensates through the 2/K high-pass scaling in the
 				// 9/7 transform; mirror that so the step sizes match.
 				band.step = float64(float32((1 + float64(t.img.quant.mantAt(bndno))/2048) *
-					math.Pow(2, float64(t.img.comps[0].prec-t.img.quant.expnAt(bndno)))))
+					math.Ldexp(1, t.img.comps[0].prec-t.img.quant.expnAt(bndno))))
 			}
 			if band.numbps < 0 {
 				return &ErrJPCMalformed{Reason: fmt.Sprintf("band %d has %d bit planes", bndno, band.numbps)}
@@ -823,6 +823,14 @@ const (
 	jpc97TwoInvK = 1.625732422
 )
 
+// jpcMul32 rounds a float32 product explicitly. The explicit bit round-trip
+// keeps the result identical whether or not the target fuses multiply-add
+// (arm64 can emit FMADD/FMSUB, amd64 normally does not), which matters because
+// the 9/7 output must match OpenJPEG on every architecture.
+func jpcMul32(a, b float32) float32 {
+	return math.Float32frombits(math.Float32bits(a * b))
+}
+
 // synthesize97 is the irreversible counterpart of synthesize: same region and
 // row/column traversal, but the lifting runs in float32 like the reference.
 func (t *jpcTileDecoder) synthesize97(f []float32) {
@@ -903,30 +911,30 @@ func jpcInvLift97(a []float32, base, n, step, parity int) {
 
 	if parity == 0 {
 		for i := 0; i < llen; i++ {
-			setS(i, sAt(i)-jpc97Delta*(dAt(i-1)+dAt(i)))
+			setS(i, sAt(i)-jpcMul32(jpc97Delta, dAt(i-1)+dAt(i)))
 		}
 		for i := 0; i < dn; i++ {
-			setD(i, dAt(i)-jpc97Gamma*(sAt(i)+sAt(i+1)))
+			setD(i, dAt(i)-jpcMul32(jpc97Gamma, sAt(i)+sAt(i+1)))
 		}
 		for i := 0; i < llen; i++ {
-			setS(i, sAt(i)-jpc97Beta*(dAt(i-1)+dAt(i)))
+			setS(i, sAt(i)-jpcMul32(jpc97Beta, dAt(i-1)+dAt(i)))
 		}
 		for i := 0; i < dn; i++ {
-			setD(i, dAt(i)-jpc97Alpha*(sAt(i)+sAt(i+1)))
+			setD(i, dAt(i)-jpcMul32(jpc97Alpha, sAt(i)+sAt(i+1)))
 		}
 		return
 	}
 	for i := 0; i < llen; i++ {
-		setS(i, sAt(i)-jpc97Delta*(dAt(i)+dAt(i+1)))
+		setS(i, sAt(i)-jpcMul32(jpc97Delta, dAt(i)+dAt(i+1)))
 	}
 	for i := 0; i < dn; i++ {
-		setD(i, dAt(i)-jpc97Gamma*(sAt(i-1)+sAt(i)))
+		setD(i, dAt(i)-jpcMul32(jpc97Gamma, sAt(i-1)+sAt(i)))
 	}
 	for i := 0; i < llen; i++ {
-		setS(i, sAt(i)-jpc97Beta*(dAt(i)+dAt(i+1)))
+		setS(i, sAt(i)-jpcMul32(jpc97Beta, dAt(i)+dAt(i+1)))
 	}
 	for i := 0; i < dn; i++ {
-		setD(i, dAt(i)-jpc97Alpha*(sAt(i-1)+sAt(i)))
+		setD(i, dAt(i)-jpcMul32(jpc97Alpha, sAt(i-1)+sAt(i)))
 	}
 }
 
