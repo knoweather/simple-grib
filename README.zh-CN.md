@@ -68,7 +68,7 @@ for m, err := range f.Messages() {
 | **GRIB1 解码**：五段解析 + 数值（float64 原生精度）+ 坐标；与 GRIB2 可混装 | ✅ |
 | 元数据：Identification / Product（含 WMO 码表名）、`Walk` 通用模板遍历器（254 模板一个解析器） | ✅ |
 | 网格坐标：3.0/3.1/3.2/3.3（+rotated）、3.40/3.41 Gaussian、**3.20 polar stereographic / 3.30 Lambert conformal 逐点坐标** | ✅ |
-| 数据解码：5.0 simple（任意位宽位流）、5.2 complex、5.3 complex+spatial differencing、5.4 IEEE binary32、**5.40 JPEG 2000（纯 Go JPC 解码器）**、**5.41 PNG（灰度 1/2/4/8/16 bit）**、5.42 CCSDS AEC（自研 codec）；5.49152 承载 WebP 图像载荷（local-use，原样存储；头解析/解码经 `simple-webp`） | ✅ |
+| 数据解码：5.0 simple（任意位宽位流）、5.2 complex、5.3 complex+spatial differencing、5.4 IEEE binary32、**5.40 JPEG 2000（纯 Go JPC 解码器，5/3 + 9/7）**、**5.41 PNG（灰度 1/2/4/8/16 bit）**、5.42 CCSDS AEC（自研 codec）；5.49152 承载 WebP 图像载荷（local-use，原样存储；头解析/解码经 `simple-webp`） | ✅ |
 | bitmap（section 6，indicator 0/255）+ 声明点数交叉校验 | ✅ |
 | writer `gribw`：模板驱动编码 5.0 / 5.4，round-trip 测试；5.41 PNG（`SetPNG`）与 5.49152 WebP（`SetWebP`）图像；local 表注册 | ✅ |
 | writer `gribw1`：GRIB1 编码（简单打包，类型 0/4 网格 + 位图 + 常量场） | ✅ |
@@ -275,12 +275,13 @@ L1 线格式层 File（io.ReaderAt + 消息索引）→ Message（整条缓冲�
 - **真实语料位级对拍**：CMA LARP 四锚点 442 消息（358M 值）+ data_snd 11 件 1109 消息（788.8M 值，含 CCSDS 156/156、simple pack 69/69）与 eccodes 逐点 SHA-256 一致；JPEG 2000 另经 Jasper 自身解码器交叉验证。
 - **eccodes 二进制对拍向量**（`testdata/ecc-xcheck/`）：simple packing 576/576、IEEE 108/108（含 ±Inf/NaN/次正规数）、regular/Gaussian/旋转网格逐点 max diff = 0 / 4.26e-14° / 9.9e-7°。
 - **CCSDS 5.42 oracle**：36/36 PASS（`scripts/xcheck/ccsds-oracle.sh`，digest 锚在脚本头注）。
+- **JPEG 2000 9/7 交叉验证**：OpenJPEG 生成的 fixture（8/16 bit、0-3 级分解、奇数尺寸）逐样本解码结果与 OpenJPEG 完全一致；生成方式见 `testdata/jpc97/README.md`。
 - **PNG 5.41 交叉验证**：pypng、Pillow 与姊妹库 simple-png 生成的独立 fixture（1/2/4/8/16 bit + Adam7），以及 500 组随机 1/2/4/8/16-bit `SetPNG` 输出经 simple-png 解码——全部逐样本一致。
 
 ## 已知限制
 
 - 数据模板 5.1 / 5.5x spectral / 5.200 run-length → `pack.ErrUnsupported` fail-loud
-- JPEG 2000 5.40：仅支持可逆 5/3 变换、LRCP、单层、单分量；不可逆 9/7、多层/多分量码流，以及 COC/QCC/RGN/POC/PPM/PPT/SOP/EPH marker 段 → `pack.ErrJPCUnsupported`
+- JPEG 2000 5.40：支持可逆 5/3 与不可逆 9/7、LRCP、单层、单分量；多层/多分量码流，以及 COC/QCC/RGN/POC/PPM/PPT/SOP/EPH marker 段 → `pack.ErrJPCUnsupported`
 - PNG 5.41：仅灰度，位深 1/2/4/8/16 且必须等于 `bitsPerValue`；彩色、带透明、调色板 PNG 一律 fail-loud；`SetPNG` 可直接从数值编码灰度图，预编码 PNG 仍可走 `SetDataSection`
 - local-use 模板 49152（WebP）是**不透明的图像载荷**：`SetWebP`/`WebP` 原字节存取，`Values` 返回 `pack.ErrNotNumeric`；有损、动画都接受（动画由 `WebPImage` 取首帧）；图像尺寸不必等于网格点数——`numberOfValues` 记录的是像素数
 - IEEE 5.4 仅 precision=1（binary32）；64/128-bit → fail-loud

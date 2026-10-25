@@ -87,7 +87,7 @@ like ecCodes' `codetable_title`; `grib1.RegisterTable2` still overrides it.
 | **GRIB1 decoding**: five-section parse + values (native float64) + coordinates; mixable with GRIB2 | ✅ |
 | Metadata: Identification / Product (with WMO code-table names), `Walk` generic template walker (one parser for all 254 templates) | ✅ |
 | Grid coordinates: 3.0/3.1/3.2/3.3 (+rotated), 3.40/3.41 Gaussian, **3.20 polar stereographic / 3.30 Lambert conformal point-by-point** | ✅ |
-| Data decoding: 5.0 simple (any bit width), 5.2 complex, 5.3 complex+spatial differencing, 5.4 IEEE binary32, **5.40 JPEG 2000 (pure-Go JPC decoder)**, **5.41 PNG (grayscale 1/2/4/8/16-bit)**, 5.42 CCSDS AEC (own codec); 5.49152 carries a WebP image payload (local use, stored verbatim; header/decode via `simple-webp`) | ✅ |
+| Data decoding: 5.0 simple (any bit width), 5.2 complex, 5.3 complex+spatial differencing, 5.4 IEEE binary32, **5.40 JPEG 2000 (pure-Go JPC decoder, 5/3 + 9/7)**, **5.41 PNG (grayscale 1/2/4/8/16-bit)**, 5.42 CCSDS AEC (own codec); 5.49152 carries a WebP image payload (local use, stored verbatim; header/decode via `simple-webp`) | ✅ |
 | Bitmap (section 6, indicator 0/255) + declared point count cross-check | ✅ |
 | Writers: `gribw` templates 5.0 / 5.4 with round-trip tests, plus 5.41 PNG (`SetPNG`) and 5.49152 WebP (`SetWebP`) images; local table registration | ✅ |
 | Writer `gribw1`: GRIB1 encoding (simple packing, grid types 0/4 + bitmap + constant fields) | ✅ |
@@ -344,6 +344,9 @@ L1 wire format File (io.ReaderAt + message index) → Message (whole-message buf
  9.9e-7°.
 - **CCSDS 5.42 oracle**: 36/36 PASS (`scripts/xcheck/ccsds-oracle.sh`, digest
  anchors in the script header comments).
+- **JPEG 2000 9/7 cross-check**: OpenJPEG-generated fixtures (8/16-bit, 0-3
+ decomposition levels, odd dimensions) decode sample-for-sample identically to
+ OpenJPEG; generator provenance in `testdata/jpc97/README.md`.
 - **PNG 5.41 cross-checks**: encoder-independent fixtures from pypng, Pillow
  and the sister library simple-png (1/2/4/8/16-bit plus Adam7), and 500
  randomized 1/2/4/8/16-bit `SetPNG` outputs decoded by simple-png — every
@@ -353,9 +356,9 @@ L1 wire format File (io.ReaderAt + message index) → Message (whole-message buf
 
 - Data templates 5.1 / 5.5x spectral / 5.200 run-length →
  `pack.ErrUnsupported` (fail-loud)
-- JPEG 2000 5.40: reversible 5/3 transform, LRCP order, one layer and one
- component only; irreversible 9/7, multi-layer / multi-component codestreams
- and COC/QCC/RGN/POC/PPM/PPT/SOP/EPH markers → `pack.ErrJPCUnsupported`
+- JPEG 2000 5.40: reversible 5/3 and irreversible 9/7, LRCP order, one layer
+ and one component; multi-layer / multi-component codestreams and
+ COC/QCC/RGN/POC/PPM/PPT/SOP/EPH markers → `pack.ErrJPCUnsupported`
 - PNG 5.41: grayscale only, bit depth 1/2/4/8/16 and equal to
  `bitsPerValue`; colour, transparent and palette PNGs → fail-loud. `SetPNG`
  encodes a grayscale image from values; a pre-encoded PNG can still be
