@@ -275,6 +275,7 @@ L1 线格式层 File（io.ReaderAt + 消息索引）→ Message（整条缓冲�
 - **真实语料位级对拍**：CMA LARP 四锚点 442 消息（358M 值）+ data_snd 11 件 1109 消息（788.8M 值，含 CCSDS 156/156、simple pack 69/69）与 eccodes 逐点 SHA-256 一致；JPEG 2000 另经 Jasper 自身解码器交叉验证。
 - **eccodes 二进制对拍向量**（`testdata/ecc-xcheck/`）：simple packing 576/576、IEEE 108/108（含 ±Inf/NaN/次正规数）、regular/Gaussian/旋转网格逐点 max diff = 0 / 4.26e-14° / 9.9e-7°。
 - **CCSDS 5.42 oracle**：36/36 PASS（`scripts/xcheck/ccsds-oracle.sh`，digest 锚在脚本头注）。
+- **PNG 5.41 交叉验证**：pypng、Pillow 与姊妹库 simple-png 生成的独立 fixture（1/2/4/8/16 bit + Adam7），以及 500 组随机 1/2/4/8/16-bit `SetPNG` 输出经 simple-png 解码——全部逐样本一致。
 
 ## 已知限制
 

@@ -344,6 +344,10 @@ L1 wire format File (io.ReaderAt + message index) → Message (whole-message buf
  9.9e-7°.
 - **CCSDS 5.42 oracle**: 36/36 PASS (`scripts/xcheck/ccsds-oracle.sh`, digest
  anchors in the script header comments).
+- **PNG 5.41 cross-checks**: encoder-independent fixtures from pypng, Pillow
+ and the sister library simple-png (1/2/4/8/16-bit plus Adam7), and 500
+ randomized 1/2/4/8/16-bit `SetPNG` outputs decoded by simple-png — every
+ sample matches.
 
 ## Known limitations
 
