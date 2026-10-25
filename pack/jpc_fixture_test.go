@@ -185,9 +185,9 @@ func TestJPCRejectsUnsupportedFeatures(t *testing.T) {
 		t.Fatal("COD marker not found in fixture")
 	}
 
-	t.Run("irreversible 9/7", func(t *testing.T) {
+	t.Run("unknown wavelet transform", func(t *testing.T) {
 		out := append([]byte(nil), data...)
-		out[codOff+4+9] = 0 // Scod parameters byte 9: Transform = 0
+		out[codOff+4+9] = 2 // Scod parameters byte 9: Transform = 2
 		_, _, _, _, err := jpcDecodeSamples(out)
 		var uns *ErrJPCUnsupported
 		if err == nil || !asUnsupported(err, &uns) {
@@ -203,11 +203,11 @@ func TestJPCRejectsUnsupportedFeatures(t *testing.T) {
 			t.Fatalf("err = %v, want ErrJPCMalformed for a COD that declares precincts but carries no precinct bytes", err)
 		}
 	})
-	t.Run("quantized QCD", func(t *testing.T) {
+	t.Run("unknown quantization style", func(t *testing.T) {
 		out := append([]byte(nil), data...)
 		for i := 0; i+2 < len(out); i++ {
 			if out[i] == 0xff && out[i+1] == 0x5c {
-				out[i+4] = 0x21 // Sqcd: style 1 (derivation)
+				out[i+4] = 0x23 // Sqcd: style 3 (undefined)
 				break
 			}
 		}

@@ -1,7 +1,8 @@
 //
 // JPEG 2000 分块（tile）解码：code-block/precinct/分辨率级几何、包（packet）遍历
-// （LRCP）、tier-2 包头解码、tier-1 code-block 解码，以及 5/3 逆离散小波变换，
-// 最终按光栅顺序输出分量样本。
+// （LRCP）、tier-2 包头解码、tier-1 code-block 解码，以及 5/3/9/7 逆离散小波变换，
+// 最终按光栅顺序输出分量样本。9/7 路径按参考解码器的 half-LSB 重建与 0.5*stepsize
+// 反量化约定实现，输出与 OpenJPEG 逐样本一致。
 //
 // 这里的几何构造完全复刻参考解码器的做法（分辨率级按最粗者在前排序，未使用
 // precinct 时其指数默认取 15，code-block 网格对齐到 code-block group 起点），
@@ -51,6 +52,7 @@ type jpcBand struct {
 	locX, locY                 int // (xstart, ystart) 在合成数组中的位置
 	orient                     int
 	numbps                     int
+	step                       float64   // 9/7 反量化步长；5/3 恒为 1
 	prcs                       []*jpcPrc // 每个 precinct 一项
 }
 
@@ -82,7 +84,7 @@ func (t *jpcTileDecoder) buildGeometry() error {
 		return &ErrJPCMalformed{Reason: fmt.Sprintf("%d resolution levels", numrlvls)}
 	}
 	numbandsTotal := 3*(numrlvls-1) + 1
-	if len(t.img.quant.expns) < numbandsTotal {
+	if len(t.img.quant.expns) < numbandsTotal && len(t.img.quant.expns) != 1 {
 		return &ErrJPCMalformed{Reason: fmt.Sprintf("QCD provides %d step sizes, the codestream needs %d", len(t.img.quant.expns), numbandsTotal)}
 	}
 
@@ -166,7 +168,15 @@ func (t *jpcTileDecoder) buildGeometry() error {
 				locX:   bnd.locX - t.tx0,
 				locY:   bnd.locY - t.ty0,
 				orient: bnd.orient,
-				numbps: t.img.quant.numguard + t.img.quant.expns[bndno] - 1,
+				numbps: t.img.quant.numguard + t.img.quant.expnAt(bndno) - 1,
+				step:   1,
+			}
+			if t.img.quant.qntsty != jpcQcxNoqnt {
+				// OpenJPEG's irreversible decoder sets log2_gain to 0 for every
+				// band and compensates through the 2/K high-pass scaling in the
+				// 9/7 transform; mirror that so the step sizes match.
+				band.step = float64(float32((1 + float64(t.img.quant.mantAt(bndno))/2048) *
+					math.Pow(2, float64(t.img.comps[0].prec-t.img.quant.expnAt(bndno)))))
 			}
 			if band.numbps < 0 {
 				return &ErrJPCMalformed{Reason: fmt.Sprintf("band %d has %d bit planes", bndno, band.numbps)}
@@ -731,23 +741,214 @@ func jpcDecodeSamples(data []byte) (samples []int32, w, h, prec int, err error) 
 	if err := t.decodeCodeBlocks(); err != nil {
 		return nil, 0, 0, 0, err
 	}
-	t.synthesize()
+	if img.cs.qmfbid == jpcCoxRft {
+		t.synthesize()
+	} else {
+		f := t.dequantize()
+		t.synthesize97(f)
+		for i, v := range f {
+			r := math.RoundToEven(float64(v))
+			if r > math.MaxInt32 {
+				r = math.MaxInt32
+			}
+			if r < math.MinInt32 {
+				r = math.MinInt32
+			}
+			t.data[i] = int32(r)
+		}
+	}
 
 	prec = img.comps[0].prec
 	if img.comps[0].sgnd == 0 {
 		shift := int32(1) << (prec - 1)
+		maxv := shift<<1 - 1
 		for i := range t.data {
-			t.data[i] += shift
+			v := t.data[i] + shift
+			if v < 0 {
+				v = 0
+			} else if v > maxv {
+				v = maxv
+			}
+			t.data[i] = v
 		}
 	}
 	return t.data, w, h, prec, nil
 }
 
+// jpcT1ToOpenJPEG converts this decoder's exact tier-1 magnitude into the
+// value OpenJPEG's T1 decoder produces for the same code-block. OpenJPEG keeps
+// a half-LSB midpoint bias (oneplushalf / poshalf) and compensates for the 9/7
+// path by dequantizing with 0.5*stepsize; reproducing the biased value is what
+// makes the output match the reference decoder sample for sample.
+func jpcT1ToOpenJPEG(c int32) int32 {
+	if c == 0 {
+		return 0
+	}
+	if c > 0 {
+		return 2*c + 1
+	}
+	return 2*c - 1
+}
+
+// dequantize expands the tier-1 integers into the 9/7 coefficient domain:
+// every band is multiplied by 0.5*stepsize (the reference factor), everything
+// else stays zero.
+func (t *jpcTileDecoder) dequantize() []float32 {
+	f := make([]float32, len(t.data))
+	for _, lvl := range t.levels {
+		for _, b := range lvl.bands {
+			bw, bh := b.xend-b.xstart, b.yend-b.ystart
+			if bw <= 0 || bh <= 0 {
+				continue
+			}
+			halfStep := float32(0.5) * float32(b.step)
+			for y := 0; y < bh; y++ {
+				base := (b.locY+y)*t.w + b.locX
+				for x := 0; x < bw; x++ {
+					f[base+x] = float32(jpcT1ToOpenJPEG(t.data[base+x])) * halfStep
+				}
+			}
+		}
+	}
+	return f
+}
+
+// 9/7 lifting constants, using the reference decoder's float32 literals.
+const (
+	jpc97Alpha   = -1.586134342
+	jpc97Beta    = -0.052980118
+	jpc97Gamma   = 0.882911075
+	jpc97Delta   = 0.443506852
+	jpc97K       = 1.230174105
+	jpc97TwoInvK = 1.625732422
+)
+
+// synthesize97 is the irreversible counterpart of synthesize: same region and
+// row/column traversal, but the lifting runs in float32 like the reference.
+func (t *jpcTileDecoder) synthesize97(f []float32) {
+	numlvls := t.img.cs.numdlvls
+	type reg struct{ xstart, ystart, w, h int }
+	regs := make([]reg, 0, numlvls+1)
+	regs = append(regs, reg{t.tx0, t.ty0, t.w, t.h})
+	for i := 0; i < numlvls; i++ {
+		p := regs[len(regs)-1]
+		xs := ceilDivPow2(p.xstart, 1)
+		ys := ceilDivPow2(p.ystart, 1)
+		regs = append(regs, reg{xs, ys, ceilDivPow2(p.xstart+p.w, 1) - xs, ceilDivPow2(p.ystart+p.h, 1) - ys})
+	}
+	tmpLen := t.w
+	if hh := (t.h + 1) / 2; hh > tmpLen {
+		tmpLen = hh
+	}
+	tmp := make([]float32, tmpLen)
+	for i := len(regs) - 2; i >= 0; i-- {
+		r := regs[i]
+		if r.w == 0 || r.h == 0 {
+			continue
+		}
+		colparity := r.xstart & 1
+		rowparity := r.ystart & 1
+		for row := 0; row < r.h; row++ {
+			base := row * t.w
+			jpcInvLift97(f, base, r.w, 1, colparity)
+			jpcJoin1DF(f, base, r.w, 1, colparity, tmp)
+		}
+		for col := 0; col < r.w; col++ {
+			jpcInvLift97(f, col, r.h, t.w, rowparity)
+			jpcJoin1DF(f, col, r.h, t.w, rowparity, tmp)
+		}
+	}
+}
+
+// jpcInvLift97 applies one inverse 9/7 lifting step to a strided line stored as
+// [low..., high...]; parity says whether the first sample is low (0) or high
+// (1). Boundary samples use symmetric extension, as the reference decoder does.
+func jpcInvLift97(a []float32, base, n, step, parity int) {
+	if n <= 0 {
+		return
+	}
+	llen := (n + boolInt(parity == 0)) >> 1
+	dn := n - llen
+	if dn == 0 || llen == 0 {
+		return
+	}
+	dAt := func(i int) float32 {
+		if i < 0 {
+			i = 0
+		}
+		if i >= dn {
+			i = dn - 1
+		}
+		return a[base+(llen+i)*step]
+	}
+	sAt := func(i int) float32 {
+		if i < 0 {
+			i = 0
+		}
+		if i >= llen {
+			i = llen - 1
+		}
+		return a[base+i*step]
+	}
+	setS := func(i int, v float32) { a[base+i*step] = v }
+	setD := func(i int, v float32) { a[base+(llen+i)*step] = v }
+
+	// inverse scaling: low-pass by K, high-pass by 2/K (reference convention)
+	for i := 0; i < llen; i++ {
+		setS(i, sAt(i)*jpc97K)
+	}
+	for i := 0; i < dn; i++ {
+		setD(i, dAt(i)*jpc97TwoInvK)
+	}
+
+	if parity == 0 {
+		for i := 0; i < llen; i++ {
+			setS(i, sAt(i)-jpc97Delta*(dAt(i-1)+dAt(i)))
+		}
+		for i := 0; i < dn; i++ {
+			setD(i, dAt(i)-jpc97Gamma*(sAt(i)+sAt(i+1)))
+		}
+		for i := 0; i < llen; i++ {
+			setS(i, sAt(i)-jpc97Beta*(dAt(i-1)+dAt(i)))
+		}
+		for i := 0; i < dn; i++ {
+			setD(i, dAt(i)-jpc97Alpha*(sAt(i)+sAt(i+1)))
+		}
+		return
+	}
+	for i := 0; i < llen; i++ {
+		setS(i, sAt(i)-jpc97Delta*(dAt(i)+dAt(i+1)))
+	}
+	for i := 0; i < dn; i++ {
+		setD(i, dAt(i)-jpc97Gamma*(sAt(i-1)+sAt(i)))
+	}
+	for i := 0; i < llen; i++ {
+		setS(i, sAt(i)-jpc97Beta*(dAt(i)+dAt(i+1)))
+	}
+	for i := 0; i < dn; i++ {
+		setD(i, dAt(i)-jpc97Alpha*(sAt(i-1)+sAt(i)))
+	}
+}
+
+// jpcJoin1DF is the float counterpart of jpcJoin1D.
+func jpcJoin1DF(a []float32, base, n, step, parity int, tmp []float32) {
+	llen := (n + boolInt(parity == 0)) >> 1
+	for i := 0; i < llen; i++ {
+		tmp[i] = a[base+i*step]
+	}
+	for i := 0; i < n-llen; i++ {
+		a[base+(1-parity+2*i)*step] = a[base+(llen+i)*step]
+	}
+	for i := 0; i < llen; i++ {
+		a[base+(parity+2*i)*step] = tmp[i]
+	}
+}
+
 // jpcUnpacker 解码 GRIB2 数据表示模板 5.40（JPEG 2000 code stream 格式），
-// 对应本文件开头所述的无损 5/3 子集。
+// 支持可逆 5/3 与不可逆 9/7 子集。
 type jpcUnpacker struct{}
 
-func (jpcUnpacker) Name() string { return "JPEG 2000 code stream (5.40), 5/3 lossless subset" }
+func (jpcUnpacker) Name() string { return "JPEG 2000 code stream (5.40), 5/3 and 9/7 subset" }
 
 func (jpcUnpacker) Unpack(ctx *Context) ([]float32, error) {
 	if ctx.Fields == nil || ctx.Fields.Len() < 7 {
@@ -757,10 +958,10 @@ func (jpcUnpacker) Unpack(ctx *Context) ([]float32, error) {
 	E := int16(smInt16(uint16(ctx.Fields.At(1).U)))
 	D := int16(smInt16(uint16(ctx.Fields.At(2).U)))
 	compressionType := uint8(ctx.Fields.At(5).U)
-	if compressionType != 0 {
+	if compressionType > 1 {
 		return nil, &ErrJPCUnsupported{
-			Feature: "lossy JPEG 2000 packing",
-			Detail:  fmt.Sprintf("octet 22 = %d (only 'Lossless' is implemented)", compressionType),
+			Feature: "JPEG 2000 compression type",
+			Detail:  fmt.Sprintf("octet 22 = %d (only 0 lossless and 1 lossy are implemented)", compressionType),
 		}
 	}
 

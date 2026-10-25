@@ -119,6 +119,27 @@ type jpcQuant struct {
 	qntsty   int
 	numguard int
 	expns    []int // 逐 band 的指数（NOQNT 下该字节即指数）
+	mants    []int // SEQNT 下逐 band 的尾数（11 位）
+}
+
+// expnAt 返回第 i 个 band 的指数；标量派生量化（style 1）只存一个步长，
+// 作用于所有 band。
+func (q jpcQuant) expnAt(i int) int {
+	if len(q.expns) == 1 {
+		return q.expns[0]
+	}
+	return q.expns[i]
+}
+
+// mantAt 返回第 i 个 band 的尾数；没有尾数或索引超出声明列表时按 0 处理。
+func (q jpcQuant) mantAt(i int) int {
+	if len(q.mants) == 1 {
+		return q.mants[0]
+	}
+	if i < len(q.mants) {
+		return q.mants[i]
+	}
+	return 0
 }
 
 // jpcImage 是解析后的 JPEG 2000 码流，且限定在受支持的子集内。
@@ -437,8 +458,8 @@ func parseCOD(payload []byte, img *jpcImage) error {
 	if cs.mct != 0 {
 		return &ErrJPCUnsupported{Feature: "multi-component transform"}
 	}
-	if cs.qmfbid != jpcCoxRft {
-		return &ErrJPCUnsupported{Feature: "wavelet transform", Detail: fmt.Sprintf("Transform=%d; only the reversible 5/3 transform is implemented", cs.qmfbid)}
+	if cs.qmfbid != jpcCoxRft && cs.qmfbid != jpcCoxIns {
+		return &ErrJPCUnsupported{Feature: "wavelet transform", Detail: fmt.Sprintf("Transform=%d; only 5/3 (1) and 9/7 (0) are implemented", cs.qmfbid)}
 	}
 	if cs.cblksty != 0 {
 		return &ErrJPCUnsupported{Feature: "code-block modes", Detail: fmt.Sprintf("ScodM=0x%02x (LAZY/RESET/TERMALL/VSC/PTERM/SEGSYM)", cs.cblksty)}
@@ -476,17 +497,47 @@ func parseQCX(payload []byte) (jpcQuant, error) {
 	}
 	q.qntsty = int(payload[0] & 0x1f)
 	q.numguard = int(payload[0]>>5) & 7
-	if q.qntsty != jpcQcxNoqnt {
-		return q, &ErrJPCUnsupported{Feature: "quantization", Detail: fmt.Sprintf("Sqcd style=%d (only 'no quantization' is implemented)", q.qntsty)}
+	readStep := func(b []byte) (expn, mant int, err error) {
+		if len(b) < 2 {
+			return 0, 0, &ErrJPCMalformed{Reason: "short QCD step size"}
+		}
+		v := int(b[0])<<8 | int(b[1])
+		return (v >> 11) & 0x1f, v & 0x7ff, nil
 	}
-	// 对于无量化风格，Jasper 每个子带读取一个字节，且只保留指数。
-	n := len(payload) - 1
-	if n > 3*33+1 {
-		return q, &ErrJPCMalformed{Reason: fmt.Sprintf("QCD declares %d step sizes, too many", n)}
-	}
-	q.expns = make([]int, n)
-	for i := 0; i < n; i++ {
-		q.expns[i] = int(payload[1+i] >> 3)
+	switch q.qntsty {
+	case jpcQcxNoqnt:
+		// 对于无量化风格，Jasper 每个子带读取一个字节，且只保留指数。
+		n := len(payload) - 1
+		if n > 3*33+1 {
+			return q, &ErrJPCMalformed{Reason: fmt.Sprintf("QCD declares %d step sizes, too many", n)}
+		}
+		q.expns = make([]int, n)
+		for i := 0; i < n; i++ {
+			q.expns[i] = int(payload[1+i] >> 3)
+		}
+	case 1: // 标量派生：一个步长作用于所有 band
+		expn, mant, err := readStep(payload[1:])
+		if err != nil {
+			return q, err
+		}
+		q.expns = []int{expn}
+		q.mants = []int{mant}
+	case 2: // 标量显式：逐 band 两个字节
+		n := (len(payload) - 1) / 2
+		if (len(payload)-1)%2 != 0 {
+			return q, &ErrJPCMalformed{Reason: "QCD has an odd number of step-size bytes"}
+		}
+		q.expns = make([]int, n)
+		q.mants = make([]int, n)
+		for i := 0; i < n; i++ {
+			expn, mant, err := readStep(payload[1+2*i:])
+			if err != nil {
+				return q, err
+			}
+			q.expns[i], q.mants[i] = expn, mant
+		}
+	default:
+		return q, &ErrJPCUnsupported{Feature: "quantization", Detail: fmt.Sprintf("Sqcd style=%d", q.qntsty)}
 	}
 	return q, nil
 }
